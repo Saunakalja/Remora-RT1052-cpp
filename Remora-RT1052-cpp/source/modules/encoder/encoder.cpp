@@ -6,7 +6,14 @@
 void createEncoder()
 {
     const char* comment = module["Comment"];
-    printf("%s\n",comment);
+
+    if ((comment != nullptr) &&
+        (comment[0] != '\0'))
+    {
+        printf(
+            "%s\n",
+            comment);
+    }
 
     int pv = module["PV[i]"];
     const char* pinA = module["ChA Pin"];

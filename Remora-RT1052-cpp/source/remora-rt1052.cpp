@@ -1074,6 +1074,135 @@ void loadModules(void)
             }
         }
 
+        if (!strcmp(thread,"Base") &&
+            !strcmp(type,"Encoder"))
+        {
+            JsonVariantConst pvValue =
+                moduleObject["PV[i]"];
+
+            if (!pvValue.is<uint32_t>())
+            {
+                printf(
+                    "Encoder module entry %lu PV index is missing or is not an unsigned integer\n",
+                    static_cast<unsigned long>(moduleIndex));
+                configError = true;
+                return;
+            }
+
+            const uint32_t pvIndex =
+                pvValue.as<uint32_t>();
+
+            if (pvIndex >= VARIABLES)
+            {
+                printf(
+                    "Encoder module entry %lu PV index %lu is out of range\n",
+                    static_cast<unsigned long>(moduleIndex),
+                    static_cast<unsigned long>(pvIndex));
+                configError = true;
+                return;
+            }
+
+            JsonVariantConst channelAPinValue =
+                moduleObject["ChA Pin"];
+
+            if (!channelAPinValue.is<const char*>())
+            {
+                printf(
+                    "Encoder module entry %lu channel A pin is missing or is not a string\n",
+                    static_cast<unsigned long>(moduleIndex));
+                configError = true;
+                return;
+            }
+
+            const char* channelAPin =
+                channelAPinValue.as<const char*>();
+
+            if (!isValidGpioPinName(channelAPin))
+            {
+                printf(
+                    "Encoder module entry %lu channel A pin is invalid\n",
+                    static_cast<unsigned long>(moduleIndex));
+                configError = true;
+                return;
+            }
+
+            JsonVariantConst channelBPinValue =
+                moduleObject["ChB Pin"];
+
+            if (!channelBPinValue.is<const char*>())
+            {
+                printf(
+                    "Encoder module entry %lu channel B pin is missing or is not a string\n",
+                    static_cast<unsigned long>(moduleIndex));
+                configError = true;
+                return;
+            }
+
+            const char* channelBPin =
+                channelBPinValue.as<const char*>();
+
+            if (!isValidGpioPinName(channelBPin))
+            {
+                printf(
+                    "Encoder module entry %lu channel B pin is invalid\n",
+                    static_cast<unsigned long>(moduleIndex));
+                configError = true;
+                return;
+            }
+
+            if (moduleObject.containsKey("Index Pin"))
+            {
+                JsonVariantConst indexPinValue =
+                    moduleObject["Index Pin"];
+
+                if (!indexPinValue.is<const char*>())
+                {
+                    printf(
+                        "Encoder module entry %lu index pin is not a string\n",
+                        static_cast<unsigned long>(moduleIndex));
+                    configError = true;
+                    return;
+                }
+
+                const char* indexPin =
+                    indexPinValue.as<const char*>();
+
+                if (!isValidGpioPinName(indexPin))
+                {
+                    printf(
+                        "Encoder module entry %lu index pin is invalid\n",
+                        static_cast<unsigned long>(moduleIndex));
+                    configError = true;
+                    return;
+                }
+
+                JsonVariantConst dataBitValue =
+                    moduleObject["Data Bit"];
+
+                if (!dataBitValue.is<uint32_t>())
+                {
+                    printf(
+                        "Encoder module entry %lu data bit is missing or is not an unsigned integer\n",
+                        static_cast<unsigned long>(moduleIndex));
+                    configError = true;
+                    return;
+                }
+
+                const uint32_t dataBit =
+                    dataBitValue.as<uint32_t>();
+
+                if (dataBit >= 32U)
+                {
+                    printf(
+                        "Encoder module entry %lu data bit %lu is out of range\n",
+                        static_cast<unsigned long>(moduleIndex),
+                        static_cast<unsigned long>(dataBit));
+                    configError = true;
+                    return;
+                }
+            }
+        }
+
         moduleIndex++;
     }
 
