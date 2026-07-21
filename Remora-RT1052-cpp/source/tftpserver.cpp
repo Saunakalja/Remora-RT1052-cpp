@@ -342,6 +342,8 @@ static int IAP_tftp_process_write(struct udp_pcb *upcb, const ip_addr_t *to, int
   status_t status = flexspi_nor_enable_quad_mode(FLEXSPI);
   if (status != kStatus_Success)
   {
+      PRINTF("Enable quad mode failure !\r\n");
+      IAP_tftp_cleanup_wr(upcb, args);
       return status;
   }
 
@@ -366,12 +368,25 @@ static int IAP_tftp_process_write(struct udp_pcb *upcb, const ip_addr_t *to, int
       if (status != kStatus_Success)
       {
           PRINTF("Erase sector failure !\r\n");
+          IAP_tftp_cleanup_wr(upcb, args);
           return -1;
       }
   }
 
   /* initiate the write transaction by sending the first ack */
-  IAP_tftp_send_ack_packet(upcb, to, to_port, args->block);
+  const err_t ackStatus =
+      IAP_tftp_send_ack_packet(
+          upcb,
+          to,
+          to_port,
+          args->block);
+
+  if (ackStatus != ERR_OK)
+  {
+      PRINTF("Initial TFTP ACK failure !\r\n");
+      IAP_tftp_cleanup_wr(upcb, args);
+      return ackStatus;
+  }
 
   return 0;
 }
