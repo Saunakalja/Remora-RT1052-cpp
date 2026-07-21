@@ -49,6 +49,10 @@ static void IAP_tftp_restore_execution(
     bool restoreThreads,
     bool restoreDMA,
     bool restoreQdc);
+static void IAP_tftp_abort_transfer(
+    struct udp_pcb *upcb,
+    tftp_connection_args *args,
+    struct pbuf *pkt_buf);
 static tftp_opcode IAP_tftp_decode_op(char *buf);
 static u16_t IAP_tftp_extract_block(char *buf);
 static void IAP_tftp_set_opcode(char *buffer, tftp_opcode opcode);
@@ -152,6 +156,30 @@ static err_t IAP_tftp_send_ack_packet(struct udp_pcb *upcb, const ip_addr_t *to,
   return err;
 }
 
+
+static void IAP_tftp_abort_transfer(
+    struct udp_pcb *upcb,
+    tftp_connection_args *args,
+    struct pbuf *pkt_buf)
+{
+    const bool restoreThreads =
+        args->restoreThreads;
+
+    const bool restoreDMA =
+        args->restoreDMA;
+
+    const bool restoreQdc =
+        args->restoreQdc;
+
+    IAP_tftp_cleanup_wr(upcb, args);
+    pbuf_free(pkt_buf);
+
+    IAP_tftp_restore_execution(
+        restoreThreads,
+        restoreDMA,
+        restoreQdc);
+}
+
 /**
   * @brief  Processes data transfers after a TFTP write request
   * @param  _args: used as pointer on TFTP connection args
@@ -213,8 +241,7 @@ static void IAP_wrq_recv_callback(void *_args, struct udp_pcb *upcb, struct pbuf
       PRINTF(
           "Configuration upload exceeds maximum size !\r\n");
 
-      IAP_tftp_cleanup_wr(upcb, args);
-      pbuf_free(pkt_buf);
+      IAP_tftp_abort_transfer(upcb, args, pkt_buf);
       return;
     }
 
@@ -222,18 +249,16 @@ static void IAP_wrq_recv_callback(void *_args, struct udp_pcb *upcb, struct pbuf
     pbuf_copy_partial(pkt_buf, data_buffer, payloadSize,
                       TFTP_DATA_PKT_HDR_LEN);
 
-    total_count += payloadSize;
-
-    count = payloadSize;
-
     /* Write received data in Flash */
 
     // A UDP packet is 512 bytes = 2 x 256 byte pages
     // First page
-	status_t status = flexspi_nor_flash_page_program(FLEXSPI, Flash_Write_Address + args->block * 512, (uint32_t *)(data_buffer));
+	status = flexspi_nor_flash_page_program(FLEXSPI, Flash_Write_Address + args->block * 512, (uint32_t *)(data_buffer));
 	if (status != kStatus_Success)
 	{
 	 PRINTF("Page program failure !\r\n");
+	 IAP_tftp_abort_transfer(upcb, args, pkt_buf);
+	 return;
 	}
 
 	// Second page
@@ -241,7 +266,13 @@ static void IAP_wrq_recv_callback(void *_args, struct udp_pcb *upcb, struct pbuf
 	if (status != kStatus_Success)
 	{
 	  PRINTF("Page program failure !\r\n");
+	  IAP_tftp_abort_transfer(upcb, args, pkt_buf);
+	  return;
 	}
+
+    total_count += payloadSize;
+
+    count = payloadSize;
 
     /* update our block number to match the block number just received */
     args->block++;
@@ -259,7 +290,24 @@ static void IAP_wrq_recv_callback(void *_args, struct udp_pcb *upcb, struct pbuf
   }
 
   /* Send the appropriate ACK pkt*/
-  IAP_tftp_send_ack_packet(upcb, addr, port, args->block);
+  const err_t ackStatus =
+      IAP_tftp_send_ack_packet(
+          upcb,
+          addr,
+          port,
+          args->block);
+
+  if (ackStatus != ERR_OK)
+  {
+    PRINTF("TFTP DATA ACK failure !\r\n");
+
+    IAP_tftp_abort_transfer(
+        upcb,
+        args,
+        pkt_buf);
+
+    return;
+  }
 
   /* If the last write returned less than the maximum TFTP data pkt length,
    * then we've received the whole file and so we can quit (this is how TFTP
@@ -357,13 +405,6 @@ static int IAP_tftp_process_write(struct udp_pcb *upcb, const ip_addr_t *to, int
   args->block = 0;
   args->tot_bytes = 0;
 
-  /* set callback for receives on this UDP PCB (Protocol Control Block) */
-  udp_recv(upcb, IAP_wrq_recv_callback, args);
-
-  total_count =0;
-
-  // Get ready to upload configuration
-
   const bool restoreThreads =
       threadsRunning;
 
@@ -372,6 +413,17 @@ static int IAP_tftp_process_write(struct udp_pcb *upcb, const ip_addr_t *to, int
 
   const bool restoreQdc =
       hasQDC;
+
+  args->restoreThreads = restoreThreads;
+  args->restoreDMA = restoreDMA;
+  args->restoreQdc = restoreQdc;
+
+  /* set callback for receives on this UDP PCB (Protocol Control Block) */
+  udp_recv(upcb, IAP_wrq_recv_callback, args);
+
+  total_count =0;
+
+  // Get ready to upload configuration
 
   printf(
       "\nReceiving new configuration. "
