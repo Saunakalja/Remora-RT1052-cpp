@@ -30,6 +30,7 @@ class Module
         virtual void configure();   // the standard interface for one off configuration
         virtual void handleInterrupt();
         virtual void disableInterrupt();
+        virtual void enableInterrupt();
 
 };
 

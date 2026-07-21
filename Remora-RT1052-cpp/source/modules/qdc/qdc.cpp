@@ -331,3 +331,22 @@ void Qdc::disableInterrupt()
 	}
 }
 
+void Qdc::enableInterrupt()
+{
+    if (this->hasIndex)
+    {
+        printf(
+            "\tEnabling Index Gpio Irq: %d\n",
+            this->irq);
+
+        GPIO_PortClearInterruptFlags(
+            this->gpioBase,
+            1U << this->indexPinInNumber);
+
+        GPIO_PortEnableInterrupts(
+            this->gpioBase,
+            1U << this->indexPinInNumber);
+
+        EnableIRQ(this->irq);
+    }
+}

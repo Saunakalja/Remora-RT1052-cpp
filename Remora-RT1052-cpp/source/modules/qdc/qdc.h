@@ -61,6 +61,7 @@ class Qdc : public Module
         Qdc(volatile float&, volatile uint32_t&, ENC_Type*, GPIO_Type*, IRQn_Type, int, int, int, int, int);
         virtual void update(void);	// Module default interface
         virtual void disableInterrupt(void);
+        virtual void enableInterrupt(void);
 
 };
 
