@@ -106,7 +106,7 @@ bool DMAstepgen = false;
 bool stepgenDMAbuffer = false;					// indicates which double buffer to use 0 or 1
 //volatile bool DMAtransferDone = false;
 
-bool DMA::DMAtransferDone = false;
+volatile bool DMA::DMAtransferDone = false;
 
 //edma_handle_t stepgen_EDMA_Handle;
 

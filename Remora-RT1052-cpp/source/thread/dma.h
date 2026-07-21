@@ -40,7 +40,7 @@ class DMA
         void stopDMA(void);
         void updateBuffers(void);
 
-		static bool				DMAtransferDone;
+		static volatile bool	DMAtransferDone;
 		edma_handle_t 			EDMA_Handle;
 };
 
