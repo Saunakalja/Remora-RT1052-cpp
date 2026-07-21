@@ -31,6 +31,7 @@ class pruTimer
 	public:
 
 		pruTimer(GPT_Type* timer, IRQn_Type irq, uint32_t frequency, pruThread* ownerPtr);
+        void resumeTimer(void);
         void stopTimer(void);
 
 };

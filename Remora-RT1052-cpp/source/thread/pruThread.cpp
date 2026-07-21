@@ -49,7 +49,14 @@ void pruThread::startThread(void)
 {
 	if (isISRthread)
 	{
-		TimerPtr = new pruTimer(this->timer, this->irq, this->frequency, this);
+		if (TimerPtr == nullptr)
+		{
+			TimerPtr = new pruTimer(this->timer, this->irq, this->frequency, this);
+		}
+		else
+		{
+			TimerPtr->resumeTimer();
+		}
 	}
 	else if (isDMAthread)
 	{

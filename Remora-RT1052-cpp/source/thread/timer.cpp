@@ -59,6 +59,18 @@ void pruTimer::startTimer(void)
     printf("	timer started\n");
 }
 
+void pruTimer::resumeTimer(void)
+{
+    GPT_ClearStatusFlags(
+        this->timer,
+        kGPT_OutputCompare1Flag);
+
+    EnableIRQ(this->irq);
+    GPT_StartTimer(this->timer);
+
+    printf("	timer resumed\n\r");
+}
+
 void pruTimer::stopTimer()
 {
     DisableIRQ(this->irq);
