@@ -393,11 +393,33 @@ static void IAP_tftp_recv_callback(void *arg, struct udp_pcb *upcb, struct pbuf 
   struct udp_pcb *upcb_tftp_data;
   err_t err;
 
+  if (pkt_buf == nullptr)
+  {
+    return;
+  }
+
+  if ((pkt_buf->len != pkt_buf->tot_len) ||
+      (pkt_buf->len < TFTP_OPCODE_LEN))
+  {
+    pbuf_free(pkt_buf);
+    return;
+  }
+
+  op = IAP_tftp_decode_op(
+      static_cast<char *>(pkt_buf->payload));
+
+  if (op != TFTP_WRQ)
+  {
+    pbuf_free(pkt_buf);
+    return;
+  }
+
   /* create new UDP PCB structure */
   upcb_tftp_data = udp_new();
   if (!upcb_tftp_data)
   {
     /* Error creating PCB. Out of Memory  */
+    pbuf_free(pkt_buf);
     return;
   }
 
@@ -409,20 +431,13 @@ static void IAP_tftp_recv_callback(void *arg, struct udp_pcb *upcb, struct pbuf 
   if (err != ERR_OK)
   {
     /* Unable to bind to port */
+    udp_remove(upcb_tftp_data);
+    pbuf_free(pkt_buf);
     return;
   }
 
-  op = IAP_tftp_decode_op((char*)pkt_buf->payload);
-  if (op != TFTP_WRQ)
-  {
-    /* remove PCB */
-    udp_remove(upcb_tftp_data);
-  }
-  else
-  {
-    /* Start the TFTP write mode*/
-    IAP_tftp_process_write(upcb_tftp_data, addr, port);
-  }
+  /* Start the TFTP write mode*/
+  IAP_tftp_process_write(upcb_tftp_data, addr, port);
   pbuf_free(pkt_buf);
 }
 
