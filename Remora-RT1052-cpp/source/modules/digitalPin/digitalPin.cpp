@@ -52,12 +52,12 @@ void createDigitalPin()
 
     if (!strcmp(mode,"Output"))
     {
-        Module* digitalPin = new DigitalPin(*ptrOutputs, 1, pin, dataBit, inv);
+        Module* digitalPin = new DigitalPin(*ptrOutputs, 1, pin, dataBit, inv, mod);
         servoThread->registerModule(digitalPin);
     }
     else if (!strcmp(mode,"Input"))
     {
-        Module* digitalPin = new DigitalPin(*ptrInputs, 0, pin, dataBit, inv);
+        Module* digitalPin = new DigitalPin(*ptrInputs, 0, pin, dataBit, inv, mod);
         servoThread->registerModule(digitalPin);
     }
     else
@@ -71,13 +71,15 @@ void createDigitalPin()
                 METHOD DEFINITIONS
 ************************************************************************/
 
-DigitalPin::DigitalPin(volatile uint32_t &ptrData, int mode, std::string portAndPin, int bitNumber, bool invert) :
+DigitalPin::DigitalPin(volatile uint32_t &ptrData, int mode, std::string portAndPin, int bitNumber, bool invert, int modifier) :
 	ptrData(&ptrData),
-	mode(mode),
-	portAndPin(portAndPin),
 	bitNumber(bitNumber),
     invert(invert),
-	modifier(modifier)
+	mask(0),
+	mode(mode),
+	modifier(modifier),
+	portAndPin(portAndPin),
+	pin(nullptr)
 {
 	this->pin = new Pin(this->portAndPin, this->mode);		// Input 0x0, Output 0x1
 	this->mask = uint32_t{1} << this->bitNumber;

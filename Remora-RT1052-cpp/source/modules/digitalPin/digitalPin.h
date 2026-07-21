@@ -28,7 +28,7 @@ class DigitalPin : public Module
 
 	public:
 
-        DigitalPin(volatile uint32_t&, int, std::string, int, bool);
+        DigitalPin(volatile uint32_t&, int, std::string, int, bool, int);
 		virtual void update(void);
 		virtual void slowUpdate(void);
 };
