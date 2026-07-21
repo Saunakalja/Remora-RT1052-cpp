@@ -88,7 +88,7 @@ Encoder::Encoder(volatile float &ptrEncoderCount, volatile uint32_t &ptrData, in
     this->indexCount = 0;
 	this->count = 0;								                // initialise the count to 0
     this->pulseCount = 0;                                           // number of base thread periods to pulse the index output    
-    this->mask = 1 << this->bitNumber;
+    this->mask = uint32_t{1} << this->bitNumber;
 }
 
 void Encoder::update()

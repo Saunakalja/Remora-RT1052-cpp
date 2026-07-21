@@ -25,7 +25,7 @@ class Encoder : public Module
         bool hasIndex;
         volatile uint32_t *ptrData; 	// pointer to the data source
 		int bitNumber;				// location in the data source
-        int mask;
+        uint32_t mask;
 
 		volatile float *ptrEncoderCount; 	// pointer to the data source
 
