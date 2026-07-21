@@ -300,12 +300,14 @@ void udp_mpg_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip_
 		return;
 	}
 
+	mpgData_t incomingMpgData = {};
+
 	// copy the UDP payload into the nvmpg structure
 	if (pbuf_copy_partial(
 			p,
-			mpgData.payload,
-			sizeof(mpgData.payload),
-			0) != sizeof(mpgData.payload))
+			incomingMpgData.payload,
+			sizeof(incomingMpgData.payload),
+			0) != sizeof(incomingMpgData.payload))
 	{
 		pbuf_free(p);
 		return;
@@ -314,9 +316,25 @@ void udp_mpg_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip_
 	// Free the p buffer
 	pbuf_free(p);
 
-	if (mpgData.header == PRU_NVMPG)
+	if (incomingMpgData.header != PRU_NVMPG)
 	{
-		// use a standard module interface to trigger the update of the MPG
-		MPG->configure();
+		return;
 	}
+
+	if (MPG == nullptr)
+	{
+		return;
+	}
+
+	__disable_irq();
+
+	memcpy(
+		mpgData.payload,
+		incomingMpgData.payload,
+		sizeof(mpgData.payload));
+
+	// use a standard module interface to trigger the update of the MPG
+	MPG->configure();
+
+	__enable_irq();
 }
