@@ -73,23 +73,42 @@ void NVMPG::update()
 
 	if (this->serialReceived)
 	{
-		// get the button number from the low nibble, subtract 2 (buttons start from #2), NVMPG start at bit 26 in the uint64_t output structure
-		mask = 1 << ((rxData & 0x0f) - 2);
+		const uint8_t receivedByte =
+			this->rxData;
 
-		// button state is from the high nibble, x0_ is button down (logical 1), x8_ is button up (logical 0)
-		buttonState = (rxData & 0x80);
+		this->rxData =
+			0U;
 
-		if (buttonState)
+		this->serialReceived =
+			false;
+
+		const uint8_t buttonNumber =
+			receivedByte & 0x0fU;
+
+		if ((buttonNumber >= 2U) &&
+			(buttonNumber <= 15U))
 		{
-			*(this->ptrData) &= ~this->mask;
-		}
-		else
-		{
-			*(this->ptrData) |= this->mask;
-		}
+			const uint8_t bitIndex =
+				buttonNumber - 2U;
 
-		rxData = 0;
-		this->serialReceived = false;
+			// get the button number from the low nibble, subtract 2 (buttons start from #2), NVMPG start at bit 26 in the uint64_t output structure
+			this->mask =
+				static_cast<uint16_t>(
+					1U << bitIndex);
+
+			// button state is from the high nibble, x0_ is button down (logical 1), x8_ is button up (logical 0)
+			this->buttonState =
+				(receivedByte & 0x80U) != 0U;
+
+			if (this->buttonState)
+			{
+				*(this->ptrData) &= ~this->mask;
+			}
+			else
+			{
+				*(this->ptrData) |= this->mask;
+			}
+		}
 	}
 
 	if (this->payloadReceived)
