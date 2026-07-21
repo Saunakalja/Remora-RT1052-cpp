@@ -366,16 +366,37 @@ void Qdc::update()
 
   if (this->hasIndex)                                     // we have an index pin
   {
-      // handle index, index pulse and pulse count
-      if (this->indexDetected && (this->pulseCount == 0))    // index interrupt occured: rising edge on index pulse
+      bool indexCaptured = false;
+      int32_t capturedIndexCount = 0;
+
+      if (this->pulseCount == 0)
       {
-          *(this->ptrEncoderCount) = this->indexCount;
+          DisableIRQ(this->irq);
+
+          if (this->indexDetected)
+          {
+              __DMB();
+
+              capturedIndexCount =
+                  this->indexCount;
+
+              this->indexDetected = false;
+              indexCaptured = true;
+          }
+
+          EnableIRQ(this->irq);
+      }
+
+      // handle index, index pulse and pulse count
+      if (indexCaptured)                                  // index interrupt occured: rising edge on index pulse
+      {
+          *(this->ptrEncoderCount) =
+              capturedIndexCount;
           this->pulseCount = this->indexPulse;
           *(this->ptrData) |= this->mask;                 // set bit in data source high
       }
       else if (this->pulseCount > 0)                      // maintain both index output and encoder count for the latch period
       {
-    	  this->indexDetected = false;
           this->pulseCount--;                             // decrement the counter
       }
       else
@@ -392,8 +413,13 @@ void Qdc::update()
 
 void Qdc::indexEvent()
 {
+	this->indexCount =
+		ENC_GetPositionValue(
+			this->encBase);
+
+	__DMB();
+
 	this->indexDetected = true;
-	this->indexCount = ENC_GetPositionValue(this->encBase);
 }
 
 void Qdc::disableInterrupt()

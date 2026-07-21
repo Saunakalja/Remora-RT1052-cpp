@@ -50,10 +50,10 @@ class Qdc : public Module
 
         uint8_t state;
         int32_t count;
-        int32_t indexCount;
+        volatile int32_t indexCount;
         int8_t  indexPulse;
         int8_t  pulseCount;
-        bool    indexDetected;
+        volatile bool indexDetected;
 
 	public:
 
