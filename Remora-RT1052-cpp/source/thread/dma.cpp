@@ -13,6 +13,12 @@ DMA::DMA(DMA_Type* DMAn, uint32_t frequency):
 
 void DMA::configDMA(void)
 {
+	memset(stepgenDMAbuffer_0, 0, sizeof(stepgenDMAbuffer_0));
+	memset(stepgenDMAbuffer_1, 0, sizeof(stepgenDMAbuffer_1));
+
+	stepgenDMAbuffer = false;
+	DMAtransferDone = false;
+
 	// The Periodic Interrupt Timer (PIT) module
 	CLOCK_SetMux(kCLOCK_PerclkMux, 1U);
 	CLOCK_SetDiv(kCLOCK_PerclkDiv, 0U);
