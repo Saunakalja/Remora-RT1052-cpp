@@ -952,6 +952,49 @@ void loadModules(void)
                 configError = true;
                 return;
             }
+
+            const char* const timingFieldNames[] =
+            {
+                "Step Length",
+                "Step Space",
+                "Dir Hold",
+                "Dir Setup"
+            };
+
+            for (const char* timingFieldName : timingFieldNames)
+            {
+                if (!moduleObject.containsKey(timingFieldName))
+                {
+                    continue;
+                }
+
+                JsonVariantConst timingValue =
+                    moduleObject[timingFieldName];
+
+                if (!timingValue.is<uint32_t>())
+                {
+                    printf(
+                        "DMAstepgen module entry %lu %s is not an unsigned integer\n",
+                        static_cast<unsigned long>(moduleIndex),
+                        timingFieldName);
+                    configError = true;
+                    return;
+                }
+
+                const uint32_t timingValueNumber =
+                    timingValue.as<uint32_t>();
+
+                if (timingValueNumber > 255U)
+                {
+                    printf(
+                        "DMAstepgen module entry %lu %s value %lu is out of range\n",
+                        static_cast<unsigned long>(moduleIndex),
+                        timingFieldName,
+                        static_cast<unsigned long>(timingValueNumber));
+                    configError = true;
+                    return;
+                }
+            }
         }
 
         if (!strcmp(thread,"Base") &&
