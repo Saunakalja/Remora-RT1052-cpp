@@ -11,8 +11,8 @@ void createDigitalPin()
 
     const char* pin = module["Pin"];
     const char* mode = module["Mode"];
-    const char* invert = module["Invert"];
-    const char* modifier = module["Modifier"];
+    const char* invert = module["Invert"] | "False";
+    const char* modifier = module["Modifier"] | "None";
     int dataBit = module["Data Bit"];
 
     int mod;
