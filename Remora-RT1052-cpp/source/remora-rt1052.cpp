@@ -499,7 +499,32 @@ void getBoardType()
 {
 	if (configError) return;
 
-	board = doc["Board"];
+	JsonVariantConst boardValue =
+		doc["Board"];
+
+	if (!boardValue.is<const char*>())
+	{
+		board = nullptr;
+		printf(
+			"\n3. Board Type is missing or is not a string\n");
+		configError = true;
+		return;
+	}
+
+	const char* configuredBoard =
+		boardValue.as<const char*>();
+
+	if ((configuredBoard == nullptr) ||
+		(configuredBoard[0] == '\0'))
+	{
+		board = nullptr;
+		printf(
+			"\n3. Board Type is empty\n");
+		configError = true;
+		return;
+	}
+
+	board = configuredBoard;
 
 	printf("\n3. Board Type: %s\n",board);
 }
