@@ -44,6 +44,18 @@ Encoder::Encoder(volatile float &ptrEncoderCount, std::string ChA, std::string C
 {
 	this->pinA = new Pin(this->ChA, INPUT);			// create Pin
     this->pinB = new Pin(this->ChB, INPUT);			// create Pin
+    this->state = 0;
+
+    if (this->pinA->get())
+    {
+        this->state |= 1U;
+    }
+
+    if (this->pinB->get())
+    {
+        this->state |= 2U;
+    }
+
     this->hasIndex = false;
 	this->count = 0;								// initialise the count to 0
 }
@@ -58,6 +70,18 @@ Encoder::Encoder(volatile float &ptrEncoderCount, volatile uint32_t &ptrData, in
 {
 	this->pinA = new Pin(this->ChA, INPUT);			// create Pin
     this->pinB = new Pin(this->ChB, INPUT);			// create Pin
+    this->state = 0;
+
+    if (this->pinA->get())
+    {
+        this->state |= 1U;
+    }
+
+    if (this->pinB->get())
+    {
+        this->state |= 2U;
+    }
+
     this->pinI = new Pin(this->Index, INPUT);		// create Pin
     this->hasIndex = true;
     this->indexPulse = (PRU_BASEFREQ / PRU_SERVOFREQ) * 3;          // output the index pulse for 3 servo thread periods so LinuxCNC sees it
