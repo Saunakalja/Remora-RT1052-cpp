@@ -24,7 +24,8 @@ void createSpindlePWM()
 ************************************************************************/
 
 SpindlePWM::SpindlePWM(volatile float &ptrPwmPulseWidth) :
-    ptrPwmPulseWidth(&ptrPwmPulseWidth)
+    ptrPwmPulseWidth(&ptrPwmPulseWidth),
+    pwmPulseWidth(0.0F)
 {
 	// VSD PWM -> Analog 0-10V
 	IOMUXC_SetPinMux(IOMUXC_GPIO_B0_00_TMR1_TIMER0, 0U);
@@ -35,6 +36,7 @@ SpindlePWM::SpindlePWM(volatile float &ptrPwmPulseWidth) :
     QTMR_GetDefaultConfig(&qtmrConfig);
     qtmrConfig.primarySource = QTMR_PRIMARY_SOURCE;
     QTMR_Init(QTMR_BASEADDR, QTMR_PWM_CHANNEL, &qtmrConfig);
+    forcePwmOutput(0);
 }
 
 
