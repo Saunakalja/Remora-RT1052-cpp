@@ -60,7 +60,7 @@ static void IAP_tftp_abort_transfer(
     tftp_connection_args *args,
     struct pbuf *pkt_buf);
 static tftp_opcode IAP_tftp_decode_op(char *buf);
-static u16_t IAP_tftp_extract_block(char *buf);
+static u16_t IAP_tftp_extract_block(const char *buf);
 static void IAP_tftp_set_opcode(char *buffer, tftp_opcode opcode);
 static void IAP_tftp_set_block(char* packet, u16_t block);
 static err_t IAP_tftp_send_ack_packet(struct udp_pcb *upcb, const ip_addr_t *to, int to_port, int block);
@@ -83,10 +83,18 @@ static tftp_opcode IAP_tftp_decode_op(char *buf)
   * @param  buf: pointer on the TFTP packet
   * @retval block number
   */
-static u16_t IAP_tftp_extract_block(char *buf)
+static u16_t IAP_tftp_extract_block(
+    const char *buf)
 {
-  u16_t *b = (u16_t*)buf;
-  return ntohs(b[1]);
+  const uint8_t *bytes =
+      reinterpret_cast<const uint8_t *>(
+          buf);
+
+  return static_cast<u16_t>(
+      (static_cast<u16_t>(
+           bytes[2]) << 8U) |
+      static_cast<u16_t>(
+          bytes[3]));
 }
 
 /**
@@ -107,10 +115,21 @@ static void IAP_tftp_set_opcode(char *buffer, tftp_opcode opcode)
   * @param  block: block number
   * @retval None
   */
-static void IAP_tftp_set_block(char* packet, u16_t block)
+static void IAP_tftp_set_block(
+    char *packet,
+    u16_t block)
 {
-  u16_t *p = (u16_t *)packet;
-  p[1] = htons(block);
+  uint8_t *bytes =
+      reinterpret_cast<uint8_t *>(
+          packet);
+
+  bytes[2] =
+      static_cast<uint8_t>(
+          block >> 8U);
+
+  bytes[3] =
+      static_cast<uint8_t>(
+          block);
 }
 
 /**
@@ -265,6 +284,18 @@ static void IAP_wrq_recv_callback(void *_args, struct udp_pcb *upcb, struct pbuf
     return;
   }
 
+  if ((addr == nullptr) ||
+      (port != static_cast<u16_t>(
+                   args->to_port)) ||
+      !ip_addr_cmp(
+          addr,
+          &args->to_ip))
+  {
+    pbuf_free(
+        pkt_buf);
+    return;
+  }
+
   uint8_t data_buffer[512];
   uint16_t count = 0;
   status_t status;
@@ -286,9 +317,14 @@ static void IAP_wrq_recv_callback(void *_args, struct udp_pcb *upcb, struct pbuf
     return;
   }
 
+  const u16_t receivedBlock =
+      IAP_tftp_extract_block(
+          static_cast<const char *>(
+              pkt_buf->payload));
+
   /* Does this packet have any valid data to write? */
   if ((pkt_buf->len > TFTP_DATA_PKT_HDR_LEN) &&
-      (IAP_tftp_extract_block((char*)pkt_buf->payload) == (args->block + 1)))
+      (receivedBlock == (args->block + 1)))
   {
     const uint32_t payloadSize =
         pkt_buf->len - TFTP_DATA_PKT_HDR_LEN;
@@ -344,7 +380,7 @@ static void IAP_wrq_recv_callback(void *_args, struct udp_pcb *upcb, struct pbuf
        written is an exact multiple of 512 bytes.  In this case, the args->block
        value must still be updated, but we can skip everything else.    */
   }
-  else if (IAP_tftp_extract_block((char*)pkt_buf->payload) == (args->block + 1))
+  else if (receivedBlock == (args->block + 1))
   {
     /* update our block number to match the block number just received  */
     args->block++;
