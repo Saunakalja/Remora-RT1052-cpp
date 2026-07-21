@@ -32,20 +32,27 @@ void createStepgen()
 
 Stepgen::Stepgen(int32_t threadFreq, int jointNumber, std::string step, std::string direction, int stepBit, volatile int32_t &ptrFrequencyCommand, volatile int32_t &ptrFeedback, volatile uint8_t &ptrJointEnable) :
 	jointNumber(jointNumber),
+	mask(0),
 	step(step),
 	direction(direction),
-	stepBit(stepBit),
+	isEnabled(false),
+	isForward(false),
+	frequencyCommand(0),
 	ptrFrequencyCommand(&ptrFrequencyCommand),
+	rawCount(0),
 	ptrFeedback(&ptrFeedback),
-	ptrJointEnable(&ptrJointEnable)
+	ptrJointEnable(&ptrJointEnable),
+	DDSaccumulator(0),
+	frequencyScale(0.0F),
+	DDSaddValue(0),
+	stepBit(stepBit),
+	stepPin(nullptr),
+	directionPin(nullptr)
 {
 	this->stepPin = new Pin(this->step, OUTPUT);
 	this->directionPin = new Pin(this->direction, OUTPUT);
-	this->DDSaccumulator = 0;
 	this->frequencyScale = (float)(1 << this->stepBit) / (float)threadFreq;
 	this->mask = 1 << this->jointNumber;
-	this->isEnabled = false;
-	this->isForward = false;
 }
 
 
