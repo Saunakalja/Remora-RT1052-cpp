@@ -945,6 +945,18 @@ void pru_transfer(int txSize, int rxSize)
 {
 	int ret;
 	long long t1, t2;
+	uint8_t receiveBuffer[BUFFER_SIZE];
+	bool validResponse = false;
+	int32_t expectedHeader = PRU_ERR;
+
+	if (txData.header == PRU_READ)
+	{
+		expectedHeader = PRU_DATA;
+	}
+	else if (txData.header == PRU_WRITE)
+	{
+		expectedHeader = PRU_ACKNOWLEDGE;
+	}
 
 	// Send datagram
 	ret = send(udpSocket, txData.txBuffer, txSize, 0);
@@ -956,17 +968,37 @@ void pru_transfer(int txSize, int rxSize)
 		// Receive incoming datagram
 	    t1 = rtapi_get_time();
 	    do {
-	        ret = recv(udpSocket, rxData.rxBuffer, rxSize, MSG_TRUNC);
+	        ret = recv(udpSocket, receiveBuffer, rxSize, MSG_TRUNC);
+	        if (ret == rxSize)
+	        {
+		        int32_t receivedHeader;
+
+		        memcpy(
+			        &receivedHeader,
+			        receiveBuffer,
+			        sizeof(receivedHeader));
+
+		        if (receivedHeader == expectedHeader)
+		        {
+			        memcpy(
+				        rxData.rxBuffer,
+				        receiveBuffer,
+				        rxSize);
+
+			        validResponse = true;
+			        break;
+		        }
+	        }
 	        if(ret < 0) rtapi_delay(READ_PCK_DELAY_NS);
 	        t2 = rtapi_get_time();
-	    } while ((ret < 0) && ((t2 - t1) < 200*1000*1000));
+	    } while (!validResponse && ((t2 - t1) < 200*1000*1000));
 	}
 	else
 	{
 		ret = -1;
 	}
 
-	if (ret == rxSize)
+	if (validResponse)
 	{
 		errCount = 0;
 	}
