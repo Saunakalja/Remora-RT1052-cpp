@@ -35,6 +35,7 @@ void createDMAstepgen()
 ************************************************************************/
 
 DMAstepgen::DMAstepgen(int32_t threadFreq, int jointNumber, std::string step, std::string direction, int DMAbufferSize, int stepBit, volatile int32_t &ptrFrequencyCommand, volatile int32_t &ptrFeedback, volatile uint8_t &ptrJointEnable, uint8_t stepLength, uint8_t stepSpace, uint8_t dirHold, uint8_t dirSetup) :
+	mask(0),
 	jointNumber(jointNumber),
 	step(step),
 	direction(direction),
@@ -46,7 +47,38 @@ DMAstepgen::DMAstepgen(int32_t threadFreq, int jointNumber, std::string step, st
 	stepLength(stepLength),
 	stepSpace(stepSpace),
 	dirHold(dirHold),
-	dirSetup(dirSetup)
+	dirSetup(dirSetup),
+	stepDMAbuffer(nullptr),
+	stepDMAbuffer_0(nullptr),
+	stepDMAbuffer_1(nullptr),
+	dirDMAbuffer_0(nullptr),
+	dirDMAbuffer_1(nullptr),
+	stepDMAactiveBuffer(nullptr),
+	dirDMAactiveBuffer(nullptr),
+	stepMask(0),
+	dirMask(0),
+	isEnabled(false),
+	dir(false),
+	oldDir(false),
+	holdDDS(false),
+	isStepping(false),
+	dirChange(false),
+	frequencyCommand(0),
+	rawCount(0),
+	DDSaccumulator(0),
+	accumulator(0),
+	addValue(0),
+	minAddValue(0),
+	oldaddValue(0),
+	remainder(0),
+	prevRemainder(0),
+	stepPos(0),
+	dirPos(0),
+	stepHigh(0),
+	stepLow(0),
+	stepPin(nullptr),
+	directionPin(nullptr),
+	debug(nullptr)
 {
 	uint8_t pin, pin2;
 
