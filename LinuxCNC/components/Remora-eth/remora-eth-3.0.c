@@ -908,13 +908,20 @@ void pru_transfer(int txSize, int rxSize)
 
 	rxData.header = PRU_ERR;
 
-	// Receive incoming datagram
-    t1 = rtapi_get_time();
-    do {
-        ret = recv(udpSocket, rxData.rxBuffer, rxSize, MSG_TRUNC);
-        if(ret < 0) rtapi_delay(READ_PCK_DELAY_NS);
-        t2 = rtapi_get_time();
-    } while ((ret < 0) && ((t2 - t1) < 200*1000*1000));
+	if (ret == txSize)
+	{
+		// Receive incoming datagram
+	    t1 = rtapi_get_time();
+	    do {
+	        ret = recv(udpSocket, rxData.rxBuffer, rxSize, MSG_TRUNC);
+	        if(ret < 0) rtapi_delay(READ_PCK_DELAY_NS);
+	        t2 = rtapi_get_time();
+	    } while ((ret < 0) && ((t2 - t1) < 200*1000*1000));
+	}
+	else
+	{
+		ret = -1;
+	}
 
 	if (ret == rxSize)
 	{
