@@ -1203,6 +1203,143 @@ void loadModules(void)
             }
         }
 
+        if (!strcmp(thread,"Servo") &&
+            !strcmp(type,"Digital Pin"))
+        {
+            JsonVariantConst pinValue =
+                moduleObject["Pin"];
+
+            if (!pinValue.is<const char*>())
+            {
+                printf(
+                    "Digital Pin module entry %lu pin is missing or is not a string\n",
+                    static_cast<unsigned long>(moduleIndex));
+                configError = true;
+                return;
+            }
+
+            const char* configuredPin =
+                pinValue.as<const char*>();
+
+            if (!isValidGpioPinName(configuredPin))
+            {
+                printf(
+                    "Digital Pin module entry %lu pin is invalid\n",
+                    static_cast<unsigned long>(moduleIndex));
+                configError = true;
+                return;
+            }
+
+            JsonVariantConst modeValue =
+                moduleObject["Mode"];
+
+            if (!modeValue.is<const char*>())
+            {
+                printf(
+                    "Digital Pin module entry %lu mode is missing or is not a string\n",
+                    static_cast<unsigned long>(moduleIndex));
+                configError = true;
+                return;
+            }
+
+            const char* mode =
+                modeValue.as<const char*>();
+
+            if (strcmp(mode,"Input") &&
+                strcmp(mode,"Output"))
+            {
+                printf(
+                    "Digital Pin module entry %lu mode is invalid\n",
+                    static_cast<unsigned long>(moduleIndex));
+                configError = true;
+                return;
+            }
+
+            JsonVariantConst dataBitValue =
+                moduleObject["Data Bit"];
+
+            if (!dataBitValue.is<uint32_t>())
+            {
+                printf(
+                    "Digital Pin module entry %lu data bit is missing or is not an unsigned integer\n",
+                    static_cast<unsigned long>(moduleIndex));
+                configError = true;
+                return;
+            }
+
+            const uint32_t dataBit =
+                dataBitValue.as<uint32_t>();
+
+            if (dataBit >= 32U)
+            {
+                printf(
+                    "Digital Pin module entry %lu data bit %lu is out of range\n",
+                    static_cast<unsigned long>(moduleIndex),
+                    static_cast<unsigned long>(dataBit));
+                configError = true;
+                return;
+            }
+
+            if (moduleObject.containsKey("Invert"))
+            {
+                JsonVariantConst invertValue =
+                    moduleObject["Invert"];
+
+                if (!invertValue.is<const char*>())
+                {
+                    printf(
+                        "Digital Pin module entry %lu invert is not a string\n",
+                        static_cast<unsigned long>(moduleIndex));
+                    configError = true;
+                    return;
+                }
+
+                const char* invert =
+                    invertValue.as<const char*>();
+
+                if (strcmp(invert,"True") &&
+                    strcmp(invert,"False"))
+                {
+                    printf(
+                        "Digital Pin module entry %lu invert value is invalid\n",
+                        static_cast<unsigned long>(moduleIndex));
+                    configError = true;
+                    return;
+                }
+            }
+
+            if (moduleObject.containsKey("Modifier"))
+            {
+                JsonVariantConst modifierValue =
+                    moduleObject["Modifier"];
+
+                if (!modifierValue.is<const char*>())
+                {
+                    printf(
+                        "Digital Pin module entry %lu modifier is not a string\n",
+                        static_cast<unsigned long>(moduleIndex));
+                    configError = true;
+                    return;
+                }
+
+                const char* modifier =
+                    modifierValue.as<const char*>();
+
+                if (strcmp(modifier,"None") &&
+                    strcmp(modifier,"Open Drain") &&
+                    strcmp(modifier,"Pull Up") &&
+                    strcmp(modifier,"Pull Down") &&
+                    strcmp(modifier,"Pull None"))
+                {
+                    printf(
+                        "Digital Pin module entry %lu modifier value is invalid\n",
+                        static_cast<unsigned long>(moduleIndex));
+                    configError = true;
+                    return;
+                }
+            }
+        }
+
         moduleIndex++;
     }
 

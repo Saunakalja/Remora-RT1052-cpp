@@ -7,7 +7,14 @@
 void createDigitalPin()
 {
     const char* comment = module["Comment"];
-    printf("\n%s\n",comment);
+
+    if ((comment != nullptr) &&
+        (comment[0] != '\0'))
+    {
+        printf(
+            "\n%s\n",
+            comment);
+    }
 
     const char* pin = module["Pin"];
     const char* mode = module["Mode"];
