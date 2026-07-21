@@ -1340,6 +1340,35 @@ void loadModules(void)
             }
         }
 
+        if (!strcmp(thread,"Servo") &&
+            !strcmp(type,"Spindle PWM"))
+        {
+            JsonVariantConst setPointValue =
+                moduleObject["SP[i]"];
+
+            if (!setPointValue.is<uint32_t>())
+            {
+                printf(
+                    "Spindle PWM module entry %lu setpoint index is missing or is not an unsigned integer\n",
+                    static_cast<unsigned long>(moduleIndex));
+                configError = true;
+                return;
+            }
+
+            const uint32_t setPointIndex =
+                setPointValue.as<uint32_t>();
+
+            if (setPointIndex >= VARIABLES)
+            {
+                printf(
+                    "Spindle PWM module entry %lu setpoint index %lu is out of range\n",
+                    static_cast<unsigned long>(moduleIndex),
+                    static_cast<unsigned long>(setPointIndex));
+                configError = true;
+                return;
+            }
+        }
+
         moduleIndex++;
     }
 

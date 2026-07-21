@@ -1,5 +1,7 @@
 #include "spindlePwm.h"
 
+#include <cmath>
+
 // Module for RT1052 spindle RPM on pin GPIO1_IO08
 
 /***********************************************************************
@@ -9,7 +11,14 @@
 void createSpindlePWM()
 {
     const char* comment = module["Comment"];
-    printf("\n%s\n",comment);
+
+    if ((comment != nullptr) &&
+        (comment[0] != '\0'))
+    {
+        printf(
+            "\n%s\n",
+            comment);
+    }
 
     int sp = module["SP[i]"];
 
@@ -43,29 +52,46 @@ SpindlePWM::SpindlePWM(volatile float &ptrPwmPulseWidth) :
 
 void SpindlePWM::update()
 {
+    const float requestedPulseWidth =
+        *(this->ptrPwmPulseWidth);
 
-    if (*(this->ptrPwmPulseWidth) != this->pwmPulseWidth)
+    if (!std::isfinite(requestedPulseWidth))
     {
-        // PWM duty has changed
-        this->pwmPulseWidth = *(this->ptrPwmPulseWidth);
-
-        if (this->pwmPulseWidth > 100.0)
+        if (this->pwmPulseWidth != 0.0F)
         {
-        	this->pwmPulseWidth = 100.0;
+            this->pwmPulseWidth =
+                0.0F;
+
+            forcePwmOutput(
+                0U);
         }
 
-        if (this->pwmPulseWidth < 0.0)
+        return;
+    }
+
+    if (requestedPulseWidth != this->pwmPulseWidth)
+    {
+        // PWM duty has changed
+        this->pwmPulseWidth =
+            requestedPulseWidth;
+
+        if (this->pwmPulseWidth > 100.0F)
         {
-        	this->pwmPulseWidth = 0.0;
+            this->pwmPulseWidth = 100.0F;
+        }
+
+        if (this->pwmPulseWidth < 0.0F)
+        {
+            this->pwmPulseWidth = 0.0F;
         }
 
 
         // manage the Quad Timer inability to handle 0 and 100% conditions
-        if (this->pwmPulseWidth == 0.0)
+        if (this->pwmPulseWidth == 0.0F)
         {
         	forcePwmOutput(0);
         }
-        else if (this->pwmPulseWidth == 100.0)
+        else if (this->pwmPulseWidth == 100.0F)
         {
         	forcePwmOutput(1);
         }
