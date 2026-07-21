@@ -155,6 +155,7 @@ RTAPI_MP_INT(PRU_base_freq, "PRU base thread frequency");
 #define SEND_TIMEOUT_US 10
 #define RECV_TIMEOUT_US 10
 #define READ_PCK_DELAY_NS 10000
+#define TRANSFER_TIMEOUT_NS 500000LL
 
 static int udpSocket = -1;
 static int errCount;
@@ -944,6 +945,7 @@ void pru_transfer(int txSize, int rxSize)
 	{
 		// Receive incoming datagram
 	    t1 = rtapi_get_time();
+	    t2 = t1;
 	    do {
 	        ret = recv(udpSocket, receiveBuffer, rxSize, MSG_TRUNC);
 	        if (ret == rxSize)
@@ -968,7 +970,7 @@ void pru_transfer(int txSize, int rxSize)
 	        }
 	        if(ret < 0) rtapi_delay(READ_PCK_DELAY_NS);
 	        t2 = rtapi_get_time();
-	    } while (!validResponse && ((t2 - t1) < 200*1000*1000));
+	    } while (!validResponse && ((t2 - t1) < TRANSFER_TIMEOUT_NS));
 	}
 	else
 	{
