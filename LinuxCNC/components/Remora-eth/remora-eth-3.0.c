@@ -688,7 +688,7 @@ void update_freq(void *arg, long period)
 		}
 		
 		// test for disabled stepgen
-		if (*data->stepperEnable == 0) {
+		if (*(data->stepperEnable[i]) == 0) {
 			// set velocity to zero
 			new_vel = 0; 
 		}
