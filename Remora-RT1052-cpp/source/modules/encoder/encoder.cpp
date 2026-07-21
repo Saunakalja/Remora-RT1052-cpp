@@ -47,6 +47,7 @@ Encoder::Encoder(volatile float &ptrEncoderCount, std::string ChA, std::string C
 	mask(0),
 	ptrEncoderCount(&ptrEncoderCount),
 	state(0),
+	indexState(false),
 	count(0),
 	indexCount(0),
 	indexPulse(0),
@@ -80,6 +81,7 @@ Encoder::Encoder(volatile float &ptrEncoderCount, volatile uint32_t &ptrData, in
 	mask(0),
 	ptrEncoderCount(&ptrEncoderCount),
 	state(0),
+	indexState(false),
 	count(0),
 	indexCount(0),
 	indexPulse(0),
@@ -103,6 +105,7 @@ Encoder::Encoder(volatile float &ptrEncoderCount, volatile uint32_t &ptrData, in
     }
 
     this->pinI = new Pin(this->Index, INPUT);		// create Pin
+    this->indexState = this->pinI->get();
     this->indexPulse = (PRU_BASEFREQ / PRU_SERVOFREQ) * 3;          // output the index pulse for 3 servo thread periods so LinuxCNC sees it
     this->mask = uint32_t{1} << this->bitNumber;
 }
@@ -131,15 +134,25 @@ void Encoder::update()
 
     if (this->hasIndex)                                     // we have an index pin
     {
+        const bool indexHigh =
+            this->pinI->get();
+
+        const bool indexRising =
+            indexHigh &&
+            !this->indexState;
+
+        this->indexState =
+            indexHigh;
+
         // handle index, index pulse and pulse count
-        if (this->pinI->get() && (this->pulseCount == 0))    // rising edge on index pulse
+        if (indexRising && (this->pulseCount == 0U))         // rising edge on index pulse
         {
             this->indexCount = this->count;                 //  capture the encoder count at the index, send this to linuxCNC for one servo period 
             *(this->ptrEncoderCount) = this->indexCount;
             this->pulseCount = this->indexPulse;        
             *(this->ptrData) |= this->mask;                 // set bit in data source high
         }
-        else if (this->pulseCount > 0)                      // maintain both index output and encoder count for the latch period
+        else if (this->pulseCount > 0U)                     // maintain both index output and encoder count for the latch period
         {
             this->pulseCount--;                             // decrement the counter
         }

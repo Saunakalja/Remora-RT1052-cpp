@@ -30,10 +30,11 @@ class Encoder : public Module
 		volatile float *ptrEncoderCount; 	// pointer to the data source
 
         uint8_t state;
+        bool indexState;
         int32_t count;
         int32_t indexCount;
-        int8_t  indexPulse;
-        int8_t  pulseCount;
+        uint32_t indexPulse;
+        uint32_t pulseCount;
 
 	public:
 
