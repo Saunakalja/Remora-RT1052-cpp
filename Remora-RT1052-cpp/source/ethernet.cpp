@@ -65,7 +65,8 @@ void EthernetTasks(void)
 
 void udpServer_init(void)
 {
-   struct udp_pcb *upcb, *upcb2;
+   struct udp_pcb *upcb = nullptr;
+   struct udp_pcb *upcb2 = nullptr;
    err_t err;
 
    ip_addr_t myIPADDR;
@@ -73,31 +74,54 @@ void udpServer_init(void)
 
    // UDP control block for data
    upcb = udp_new();
-   err = udp_bind(upcb, &myIPADDR, 27181);  // 27181 is the server UDP port
-
-
-   /* 3. Set a receive callback for the upcb */
-   if(err == ERR_OK)
+   if (upcb == nullptr)
    {
-	   udp_recv(upcb, udp_data_callback, NULL);
+	   PRINTF(
+		   "Failed to allocate control UDP PCB !\r\n");
    }
    else
    {
-	   udp_remove(upcb);
+	   err = udp_bind(upcb, &myIPADDR, 27181);  // 27181 is the server UDP port
+
+	   /* 3. Set a receive callback for the upcb */
+	   if(err == ERR_OK)
+	   {
+		   udp_recv(upcb, udp_data_callback, nullptr);
+	   }
+	   else
+	   {
+		   PRINTF(
+			   "Failed to bind control UDP PCB !\r\n");
+
+		   udp_remove(upcb);
+		   upcb = nullptr;
+	   }
    }
 
 
    // UDP control block for MPG
    upcb2 = udp_new();
-   err = udp_bind(upcb2, &myIPADDR, 27182);  // 27182 is the server UDP port for NVMPG
-
-   if(err == ERR_OK)
+   if (upcb2 == nullptr)
    {
-	   udp_recv(upcb2, udp_mpg_callback, NULL);
+	   PRINTF(
+		   "Failed to allocate NVMPG UDP PCB !\r\n");
    }
    else
    {
-	   udp_remove(upcb2);
+	   err = udp_bind(upcb2, &myIPADDR, 27182);  // 27182 is the server UDP port for NVMPG
+
+	   if(err == ERR_OK)
+	   {
+		   udp_recv(upcb2, udp_mpg_callback, nullptr);
+	   }
+	   else
+	   {
+		   PRINTF(
+			   "Failed to bind NVMPG UDP PCB !\r\n");
+
+		   udp_remove(upcb2);
+		   upcb2 = nullptr;
+	   }
    }
 }
 
