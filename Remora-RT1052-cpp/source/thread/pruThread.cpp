@@ -8,23 +8,40 @@ using namespace std;
 
 // Thread constructor
 pruThread::pruThread(GPT_Type* timer, IRQn_Type irq, uint32_t frequency) :
+	TimerPtr(nullptr),
 	timer(timer),
+	DMAn(nullptr),
 	irq(irq),
-	frequency(frequency)
+	frequency(frequency),
+	isISRthread(true),
+	isDMAthread(false),
+	hasThreadPost(false),
+	vThread(),
+	vThreadPost(),
+	iter(),
+	DMAptr(nullptr)
 {
 	printf("Creating timer ISR thread %d\n", (int)this->frequency);
-	this->isISRthread = true;
 }
 
 
 pruThread::pruThread(DMA_Type* DMAn, uint32_t frequency) :
+	TimerPtr(nullptr),
+	timer(nullptr),
 	DMAn(DMAn),
-	frequency(frequency)
+	irq(NotAvail_IRQn),
+	frequency(frequency),
+	isISRthread(false),
+	isDMAthread(true),
+	hasThreadPost(false),
+	vThread(),
+	vThreadPost(),
+	iter(),
+	DMAptr(nullptr)
 {
 	printf("Creating DMA thread %d\n", (int)this->frequency);
-	DMAptr = new DMA(this->DMAn, this->frequency);
+	this->DMAptr = new DMA(this->DMAn, this->frequency);
 	this->DMAptr->configDMA();
-	this->isDMAthread = true;
 }
 
 
