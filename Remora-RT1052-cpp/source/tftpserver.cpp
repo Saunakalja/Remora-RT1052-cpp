@@ -45,6 +45,10 @@ static void IAP_tftp_recv_callback(void *arg, struct udp_pcb *Upcb, struct pbuf 
                         const ip_addr_t *addr, u16_t port);
 
 static void IAP_tftp_cleanup_wr(struct udp_pcb *upcb, tftp_connection_args *args);
+static void IAP_tftp_restore_execution(
+    bool restoreThreads,
+    bool restoreDMA,
+    bool restoreQdc);
 static tftp_opcode IAP_tftp_decode_op(char *buf);
 static u16_t IAP_tftp_extract_block(char *buf);
 static void IAP_tftp_set_opcode(char *buffer, tftp_opcode opcode);
@@ -275,6 +279,58 @@ static void IAP_wrq_recv_callback(void *_args, struct udp_pcb *upcb, struct pbuf
 }
 
 
+static void IAP_tftp_restore_execution(
+    bool restoreThreads,
+    bool restoreDMA,
+    bool restoreQdc)
+{
+    printf(
+        "\nRestoring execution after "
+        "TFTP setup failure.\n");
+
+    if (restoreDMA)
+    {
+        dmaThread->DMAptr->configDMA();
+
+        // Apply the still-zero command state before DMA starts.
+        dmaThread->run();
+
+        dmaThread->startThread();
+        DMAthreadRunning = true;
+    }
+
+    if (restoreThreads)
+    {
+        if (hasBaseThread)
+        {
+            baseThread->startThread();
+        }
+
+        if (hasServoThread)
+        {
+            servoThread->startThread();
+        }
+
+        threadsRunning = true;
+    }
+
+    if (restoreQdc)
+    {
+        for (uint8_t i = 0;
+             i < MAX_INST_QDC_MOD;
+             i++)
+        {
+            if (qdc[i] == nullptr)
+            {
+                break;
+            }
+
+            qdc[i]->enableInterrupt();
+        }
+    }
+}
+
+
 /**
   * @brief  Processes TFTP write request
   * @param  to: pointer on the receive IP address
@@ -308,6 +364,15 @@ static int IAP_tftp_process_write(struct udp_pcb *upcb, const ip_addr_t *to, int
 
   // Get ready to upload configuration
 
+  const bool restoreThreads =
+      threadsRunning;
+
+  const bool restoreDMA =
+      hasDMAthread && DMAthreadRunning;
+
+  const bool restoreQdc =
+      hasQDC;
+
   printf(
       "\nReceiving new configuration. "
       "Clearing outputs and stopping threads..\n");
@@ -321,7 +386,7 @@ static int IAP_tftp_process_write(struct udp_pcb *upcb, const ip_addr_t *to, int
       }
   }
 
-  if (threadsRunning)
+  if (restoreThreads)
   {
       if (hasBaseThread)
       {
@@ -346,7 +411,7 @@ static int IAP_tftp_process_write(struct udp_pcb *upcb, const ip_addr_t *to, int
       threadsRunning = false;
   }
 
-  if (hasDMAthread && DMAthreadRunning)
+  if (restoreDMA)
   {
 	  EDMA_StopTransfer(&edma_handle);
 	  EDMA_ResetChannel(edma_handle.base, edma_handle.channel);
@@ -362,7 +427,7 @@ static int IAP_tftp_process_write(struct udp_pcb *upcb, const ip_addr_t *to, int
 	  dmaThread->run();
   }
 
-  if (hasQDC)
+  if (restoreQdc)
   {
 	  printf("\nDisabling Index Irqs Gpio Interrupts.\n");
 	  for(uint8_t i=0; i<MAX_INST_QDC_MOD;i++)
@@ -384,6 +449,10 @@ static int IAP_tftp_process_write(struct udp_pcb *upcb, const ip_addr_t *to, int
   {
       PRINTF("Enable quad mode failure !\r\n");
       IAP_tftp_cleanup_wr(upcb, args);
+      IAP_tftp_restore_execution(
+          restoreThreads,
+          restoreDMA,
+          restoreQdc);
       return status;
   }
 
@@ -409,6 +478,10 @@ static int IAP_tftp_process_write(struct udp_pcb *upcb, const ip_addr_t *to, int
       {
           PRINTF("Erase sector failure !\r\n");
           IAP_tftp_cleanup_wr(upcb, args);
+          IAP_tftp_restore_execution(
+              restoreThreads,
+              restoreDMA,
+              restoreQdc);
           return -1;
       }
   }
@@ -425,6 +498,10 @@ static int IAP_tftp_process_write(struct udp_pcb *upcb, const ip_addr_t *to, int
   {
       PRINTF("Initial TFTP ACK failure !\r\n");
       IAP_tftp_cleanup_wr(upcb, args);
+      IAP_tftp_restore_execution(
+          restoreThreads,
+          restoreDMA,
+          restoreQdc);
       return ackStatus;
   }
 
