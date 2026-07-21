@@ -135,7 +135,6 @@ void udp_data_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip
 
 		txData.header = PRU_DATA;
 		txlen = BUFFER_SIZE;
-		comms->dataReceived();
 	}
 	else if (header == PRU_WRITE)
 	{
@@ -159,7 +158,6 @@ void udp_data_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip
 
 		txData.header = PRU_ACKNOWLEDGE;
 		txlen = sizeof(txData.header);
-		comms->dataReceived();
 
 		// ensure an atomic access to the rxBuffer
 		// disable thread interrupts
@@ -173,6 +171,8 @@ void udp_data_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip
 
 		// re-enable thread interrupts
 		__enable_irq();
+
+		comms->dataReceived();
 	}
 	else
 	{
