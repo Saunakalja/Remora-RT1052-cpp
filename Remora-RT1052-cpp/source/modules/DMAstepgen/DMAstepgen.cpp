@@ -84,7 +84,7 @@ DMAstepgen::DMAstepgen(int32_t threadFreq, int jointNumber, std::string step, st
 	// determine the dir pin number from the portAndPin string
 	pin = this->direction[3] - '0';
 	pin2 = this->direction[4] - '0';
-	if (pin2 <= 8) pin = pin * 10 + pin2;
+	if (pin2 <= 9) pin = pin * 10 + pin2;
 	this->dirMask = 1 << pin;
 }
 
