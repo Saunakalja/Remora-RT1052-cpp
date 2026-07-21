@@ -174,13 +174,30 @@ static void IAP_wrq_recv_callback(void *_args, struct udp_pcb *upcb, struct pbuf
   if ((pkt_buf->len > TFTP_DATA_PKT_HDR_LEN) &&
       (IAP_tftp_extract_block((char*)pkt_buf->payload) == (args->block + 1)))
   {
+    const uint32_t payloadSize =
+        pkt_buf->len - TFTP_DATA_PKT_HDR_LEN;
+
+    const uint32_t maxUploadSize =
+        METADATA_LEN + JSON_BUFF_SIZE;
+
+    if ((static_cast<uint32_t>(args->tot_bytes) +
+         payloadSize) > maxUploadSize)
+    {
+      PRINTF(
+          "Configuration upload exceeds maximum size !\r\n");
+
+      IAP_tftp_cleanup_wr(upcb, args);
+      pbuf_free(pkt_buf);
+      return;
+    }
+
     /* copy packet payload to data_buffer */
-    pbuf_copy_partial(pkt_buf, data_buffer, pkt_buf->len - TFTP_DATA_PKT_HDR_LEN,
+    pbuf_copy_partial(pkt_buf, data_buffer, payloadSize,
                       TFTP_DATA_PKT_HDR_LEN);
 
-    total_count += pkt_buf->len - TFTP_DATA_PKT_HDR_LEN;
+    total_count += payloadSize;
 
-    count = pkt_buf->len - TFTP_DATA_PKT_HDR_LEN;
+    count = payloadSize;
 
     /* Write received data in Flash */
 
@@ -202,7 +219,7 @@ static void IAP_wrq_recv_callback(void *_args, struct udp_pcb *upcb, struct pbuf
     /* update our block number to match the block number just received */
     args->block++;
     /* update total bytes  */
-    (args->tot_bytes) += (pkt_buf->len - TFTP_DATA_PKT_HDR_LEN);
+    (args->tot_bytes) += payloadSize;
 
     /* This is a valid pkt but it has no data.  This would occur if the file being
        written is an exact multiple of 512 bytes.  In this case, the args->block
