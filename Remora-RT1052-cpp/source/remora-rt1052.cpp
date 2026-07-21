@@ -543,6 +543,46 @@ static bool isValidGpioPinName(
     return pinNumber <= 31U;
 }
 
+static bool gpioPinNamesReferToSamePin(
+    const char* firstPinName,
+    const char* secondPinName)
+{
+    const uint32_t firstPort =
+        static_cast<uint32_t>(
+            firstPinName[1] - '0');
+
+    const uint32_t secondPort =
+        static_cast<uint32_t>(
+            secondPinName[1] - '0');
+
+    uint32_t firstPinNumber =
+        static_cast<uint32_t>(
+            firstPinName[3] - '0');
+
+    if (firstPinName[4] != '\0')
+    {
+        firstPinNumber =
+            firstPinNumber * 10U +
+            static_cast<uint32_t>(
+                firstPinName[4] - '0');
+    }
+
+    uint32_t secondPinNumber =
+        static_cast<uint32_t>(
+            secondPinName[3] - '0');
+
+    if (secondPinName[4] != '\0')
+    {
+        secondPinNumber =
+            secondPinNumber * 10U +
+            static_cast<uint32_t>(
+                secondPinName[4] - '0');
+    }
+
+    return (firstPort == secondPort) &&
+           (firstPinNumber == secondPinNumber);
+}
+
 void getBoardType()
 {
 	if (configError) return;
@@ -971,6 +1011,17 @@ void loadModules(void)
                 return;
             }
 
+            if (gpioPinNamesReferToSamePin(
+                    stepPin,
+                    directionPin))
+            {
+                printf(
+                    "DMAstepgen module entry %lu step and direction pins refer to the same GPIO\n",
+                    static_cast<unsigned long>(moduleIndex));
+                configError = true;
+                return;
+            }
+
             const char* const timingFieldNames[] =
             {
                 "Step Length",
@@ -1104,6 +1155,17 @@ void loadModules(void)
                 return;
             }
 
+            if (gpioPinNamesReferToSamePin(
+                    stepPin,
+                    directionPin))
+            {
+                printf(
+                    "Stepgen module entry %lu step and direction pins refer to the same GPIO\n",
+                    static_cast<unsigned long>(moduleIndex));
+                configError = true;
+                return;
+            }
+
             jointConfigured[jointNumber] =
                 true;
         }
@@ -1184,6 +1246,17 @@ void loadModules(void)
                 return;
             }
 
+            if (gpioPinNamesReferToSamePin(
+                    channelAPin,
+                    channelBPin))
+            {
+                printf(
+                    "Encoder module entry %lu channel A and channel B pins refer to the same GPIO\n",
+                    static_cast<unsigned long>(moduleIndex));
+                configError = true;
+                return;
+            }
+
             if (moduleObject.containsKey("Index Pin"))
             {
                 JsonVariantConst indexPinValue =
@@ -1205,6 +1278,28 @@ void loadModules(void)
                 {
                     printf(
                         "Encoder module entry %lu index pin is invalid\n",
+                        static_cast<unsigned long>(moduleIndex));
+                    configError = true;
+                    return;
+                }
+
+                if (gpioPinNamesReferToSamePin(
+                        indexPin,
+                        channelAPin))
+                {
+                    printf(
+                        "Encoder module entry %lu index pin conflicts with channel A pin\n",
+                        static_cast<unsigned long>(moduleIndex));
+                    configError = true;
+                    return;
+                }
+
+                if (gpioPinNamesReferToSamePin(
+                        indexPin,
+                        channelBPin))
+                {
+                    printf(
+                        "Encoder module entry %lu index pin conflicts with channel B pin\n",
                         static_cast<unsigned long>(moduleIndex));
                     configError = true;
                     return;
