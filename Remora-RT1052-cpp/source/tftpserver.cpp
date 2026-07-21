@@ -159,14 +159,36 @@ static err_t IAP_tftp_send_ack_packet(struct udp_pcb *upcb, const ip_addr_t *to,
 static void IAP_wrq_recv_callback(void *_args, struct udp_pcb *upcb, struct pbuf *pkt_buf, const ip_addr_t *addr, u16_t port)
 {
   tftp_connection_args *args = (tftp_connection_args *)_args;
+
+  if (pkt_buf == nullptr)
+  {
+    return;
+  }
+
+  if (args == nullptr)
+  {
+    pbuf_free(pkt_buf);
+    return;
+  }
+
   uint8_t data_buffer[512];
   uint16_t count = 0;
   status_t status;
 
   memset(data_buffer, 0x0, sizeof(data_buffer));
 
-  if (pkt_buf->len != pkt_buf->tot_len)
+  if ((pkt_buf->len != pkt_buf->tot_len) ||
+      (pkt_buf->len < TFTP_DATA_PKT_HDR_LEN) ||
+      (pkt_buf->len > TFTP_DATA_PKT_LEN_MAX))
   {
+    pbuf_free(pkt_buf);
+    return;
+  }
+
+  if (IAP_tftp_decode_op(
+        static_cast<char *>(pkt_buf->payload)) != TFTP_DATA)
+  {
+    pbuf_free(pkt_buf);
     return;
   }
 
