@@ -54,8 +54,8 @@ void DMA::configDMA(void)
 
 	EDMA_InstallTCD(this->DMAn, 0, tcdMemoryPoolPtr);
 
-	this->tcd_0 = &tcdMemoryPoolPtr[0];
-	this->tcd_1 = &tcdMemoryPoolPtr[1];
+	this->tcd_0 = reinterpret_cast<uintptr_t>(&tcdMemoryPoolPtr[0]);
+	this->tcd_1 = reinterpret_cast<uintptr_t>(&tcdMemoryPoolPtr[1]);
 }
 
 
@@ -77,7 +77,8 @@ void DMA::stopDMA(void)
 
 void DMA::updateBuffers(void)
 {
-	this->tcd_next = EDMA_GetNextTCDAddress(&this->EDMA_Handle);
+	this->tcd_next =
+		static_cast<uintptr_t>(EDMA_GetNextTCDAddress(&this->EDMA_Handle));
 
 	if (this->tcd_next == this->tcd_0)
 	{

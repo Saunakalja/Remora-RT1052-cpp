@@ -25,7 +25,7 @@ class DMA
 		edma_config_t 			userConfig;
 		pit_config_t 			pitConfig;
 
-		int32_t 				tcd_0, tcd_1, tcd_next;
+		uintptr_t 				tcd_0, tcd_1, tcd_next;
 
 		static void EDMA_Callback(edma_handle_t *handle, void *param, bool transferDone, uint32_t tcds)
 		{
