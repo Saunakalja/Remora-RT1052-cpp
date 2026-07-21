@@ -495,6 +495,54 @@ void deserialiseJSON()
     }
 }
 
+static bool isValidGpioPinName(
+    const char* pinName)
+{
+    if (pinName == nullptr)
+    {
+        return false;
+    }
+
+    const size_t pinNameLength =
+        strlen(pinName);
+
+    if ((pinNameLength != 4U) &&
+        (pinNameLength != 5U))
+    {
+        return false;
+    }
+
+    if ((pinName[0] != 'P') ||
+        (pinName[1] < '1') ||
+        (pinName[1] > '4') ||
+        (pinName[2] != '_') ||
+        (pinName[3] < '0') ||
+        (pinName[3] > '9'))
+    {
+        return false;
+    }
+
+    uint32_t pinNumber =
+        static_cast<uint32_t>(
+            pinName[3] - '0');
+
+    if (pinNameLength == 5U)
+    {
+        if ((pinName[4] < '0') ||
+            (pinName[4] > '9'))
+        {
+            return false;
+        }
+
+        pinNumber =
+            pinNumber * 10U +
+            static_cast<uint32_t>(
+                pinName[4] - '0');
+    }
+
+    return pinNumber <= 31U;
+}
+
 void getBoardType()
 {
 	if (configError) return;
@@ -853,6 +901,54 @@ void loadModules(void)
                     "DMAstepgen module entry %lu joint number %lu is out of range\n",
                     static_cast<unsigned long>(moduleIndex),
                     static_cast<unsigned long>(jointNumber));
+                configError = true;
+                return;
+            }
+
+            JsonVariantConst stepPinValue =
+                moduleObject["Step Pin"];
+
+            if (!stepPinValue.is<const char*>())
+            {
+                printf(
+                    "DMAstepgen module entry %lu step pin is missing or is not a string\n",
+                    static_cast<unsigned long>(moduleIndex));
+                configError = true;
+                return;
+            }
+
+            const char* stepPin =
+                stepPinValue.as<const char*>();
+
+            if (!isValidGpioPinName(stepPin))
+            {
+                printf(
+                    "DMAstepgen module entry %lu step pin is invalid\n",
+                    static_cast<unsigned long>(moduleIndex));
+                configError = true;
+                return;
+            }
+
+            JsonVariantConst directionPinValue =
+                moduleObject["Direction Pin"];
+
+            if (!directionPinValue.is<const char*>())
+            {
+                printf(
+                    "DMAstepgen module entry %lu direction pin is missing or is not a string\n",
+                    static_cast<unsigned long>(moduleIndex));
+                configError = true;
+                return;
+            }
+
+            const char* directionPin =
+                directionPinValue.as<const char*>();
+
+            if (!isValidGpioPinName(directionPin))
+            {
+                printf(
+                    "DMAstepgen module entry %lu direction pin is invalid\n",
+                    static_cast<unsigned long>(moduleIndex));
                 configError = true;
                 return;
             }
