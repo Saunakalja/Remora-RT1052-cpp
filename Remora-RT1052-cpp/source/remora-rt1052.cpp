@@ -782,6 +782,8 @@ void loadModules(void)
     bool nvmpgConfigured =
         false;
 
+    bool jointConfigured[JOINTS] = {};
+
     uint32_t moduleIndex = 0U;
     for (JsonArrayConst::iterator it=Modules.begin(); it!=Modules.end(); ++it)
     {
@@ -911,6 +913,16 @@ void loadModules(void)
                 return;
             }
 
+            if (jointConfigured[jointNumber])
+            {
+                printf(
+                    "DMAstepgen module entry %lu joint number %lu is already configured\n",
+                    static_cast<unsigned long>(moduleIndex),
+                    static_cast<unsigned long>(jointNumber));
+                configError = true;
+                return;
+            }
+
             JsonVariantConst stepPinValue =
                 moduleObject["Step Pin"];
 
@@ -1001,6 +1013,9 @@ void loadModules(void)
                     return;
                 }
             }
+
+            jointConfigured[jointNumber] =
+                true;
         }
 
         if (!strcmp(thread,"Base") &&
@@ -1025,6 +1040,16 @@ void loadModules(void)
             {
                 printf(
                     "Stepgen module entry %lu joint number %lu is out of range\n",
+                    static_cast<unsigned long>(moduleIndex),
+                    static_cast<unsigned long>(jointNumber));
+                configError = true;
+                return;
+            }
+
+            if (jointConfigured[jointNumber])
+            {
+                printf(
+                    "Stepgen module entry %lu joint number %lu is already configured\n",
                     static_cast<unsigned long>(moduleIndex),
                     static_cast<unsigned long>(jointNumber));
                 configError = true;
@@ -1078,6 +1103,9 @@ void loadModules(void)
                 configError = true;
                 return;
             }
+
+            jointConfigured[jointNumber] =
+                true;
         }
 
         if (!strcmp(thread,"Base") &&

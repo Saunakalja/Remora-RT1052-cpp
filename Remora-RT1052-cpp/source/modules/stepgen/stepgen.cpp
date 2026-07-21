@@ -7,8 +7,16 @@
 
 void createStepgen()
 {
-    const char* comment = module["Comment"];
-    printf("\n%s\n",comment);
+    const char* comment =
+        module["Comment"];
+
+    if ((comment != nullptr) &&
+        (comment[0] != '\0'))
+    {
+        printf(
+            "\n%s\n",
+            comment);
+    }
 
     int joint = module["Joint Number"];
     const char* step = module["Step Pin"];
