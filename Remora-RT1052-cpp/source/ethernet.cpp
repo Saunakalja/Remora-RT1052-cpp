@@ -105,18 +105,19 @@ void udp_data_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip
 {
 	int txlen = 0;
 	struct pbuf *txBuf;
-	//Lets reduce time by getting the header information before doing memcpy
+	int32_t header = 0;
 
-	int32_t header =
-			*(uint8_t*)((p->payload + (sizeof(uint8_t) * 0))) |
-			(*(uint8_t*)((p->payload + (sizeof(uint8_t) * 1))) << 8) |
-			(*(uint8_t*)((p->payload + (sizeof(uint8_t) * 2))) << 16) |
-			(*(uint8_t*)((p->payload + (sizeof(uint8_t) * 3))) << 24);/*int32_t(
-				*(uint8_t*)((p->payload + (sizeof(uint8_t) * 0))) << 24 |
-				*(uint8_t*)((p->payload + (sizeof(uint8_t) * 1))) << 16 |
-				*(uint8_t*)((p->payload + (sizeof(uint8_t) * 2))) << 8 |
-				*(uint8_t*)((p->payload + (sizeof(uint8_t) * 3)))
-			);*/
+	if (p == nullptr)
+	{
+		return;
+	}
+
+	if ((p->tot_len < sizeof(header)) ||
+		(pbuf_copy_partial(p, &header, sizeof(header), 0) != sizeof(header)))
+	{
+		pbuf_free(p);
+		return;
+	}
 
 	//We have header information we won't be using memcpy because if its PRU_READ there will be no use for it
 	// because linuxcnc just wants to read us and well memcpy for no reason takes time, so we comment it out. :)
@@ -126,12 +127,36 @@ void udp_data_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip
 
 	if (header == PRU_READ)
 	{
+		if (p->tot_len != sizeof(header))
+		{
+			pbuf_free(p);
+			return;
+		}
+
 		txData.header = PRU_DATA;
 		txlen = BUFFER_SIZE;
 		comms->dataReceived();
 	}
 	else if (header == PRU_WRITE)
 	{
+		if (p->tot_len != sizeof(rxData.rxBuffer))
+		{
+			pbuf_free(p);
+			return;
+		}
+
+		uint8_t incomingData[sizeof(rxData.rxBuffer)];
+
+		if (pbuf_copy_partial(
+				p,
+				incomingData,
+				sizeof(incomingData),
+				0) != sizeof(incomingData))
+		{
+			pbuf_free(p);
+			return;
+		}
+
 		txData.header = PRU_ACKNOWLEDGE;
 		txlen = sizeof(txData.header);
 		comms->dataReceived();
@@ -144,10 +169,15 @@ void udp_data_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip
 		//pragma pack should support memcpy, we should later look into the networking driver and see where p comes from,
 		// and see if we can provide a data location to memcpy it in to which should further reduce cpu-time.
 		// Of course not a lot but every little bit is enough.
-		memcpy(&rxData.rxBuffer, p->payload, p->len);
+		memcpy(&rxData.rxBuffer, incomingData, sizeof(incomingData));
 
 		// re-enable thread interrupts
 		__enable_irq();
+	}
+	else
+	{
+		pbuf_free(p);
+		return;
 	}
 
 
@@ -175,8 +205,27 @@ void udp_data_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip
 
 void udp_mpg_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip_addr_t *addr, u16_t port)
 {
+	if (p == nullptr)
+	{
+		return;
+	}
+
+	if (p->tot_len != sizeof(mpgData.payload))
+	{
+		pbuf_free(p);
+		return;
+	}
+
 	// copy the UDP payload into the nvmpg structure
-	memcpy(&mpgData.payload, p->payload, p->len);
+	if (pbuf_copy_partial(
+			p,
+			mpgData.payload,
+			sizeof(mpgData.payload),
+			0) != sizeof(mpgData.payload))
+	{
+		pbuf_free(p);
+		return;
+	}
 
 	// Free the p buffer
 	pbuf_free(p);
