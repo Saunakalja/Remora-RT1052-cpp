@@ -172,7 +172,34 @@ void DMAstepgen::makePulses()
 		{
 			this->oldaddValue = this->addValue;
 
-			this->addValue = (BUFFER_COUNTS * PRU_SERVOFREQ) / abs(this->frequencyCommand);		// determine the add value from the commanded frequency ratio
+			const uint32_t frequencyMagnitude =
+				(this->frequencyCommand < 0)
+					? static_cast<uint32_t>(
+						  -static_cast<int64_t>(
+							  this->frequencyCommand))
+					: static_cast<uint32_t>(
+						  this->frequencyCommand);
+
+			const uint64_t addValueNumerator =
+				static_cast<uint64_t>(
+					BUFFER_COUNTS) *
+				static_cast<uint64_t>(
+					PRU_SERVOFREQ);
+
+			const uint64_t calculatedAddValue =
+				addValueNumerator /
+				static_cast<uint64_t>(
+					frequencyMagnitude);
+
+			const uint64_t maximumAddValue =
+				static_cast<uint64_t>(
+					INT32_MAX);
+
+			this->addValue =
+				static_cast<int32_t>(
+					(calculatedAddValue > maximumAddValue)
+						? maximumAddValue
+						: calculatedAddValue);		// determine the add value from the commanded frequency ratio
 
 			if (this->addValue < this->minAddValue)
 			{
