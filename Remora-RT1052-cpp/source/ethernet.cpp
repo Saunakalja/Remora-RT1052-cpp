@@ -183,9 +183,19 @@ void udp_data_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip
 
 	// allocate pbuf from RAM
 	txBuf = pbuf_alloc(PBUF_TRANSPORT, txlen, PBUF_RAM);
+	if (txBuf == nullptr)
+	{
+		pbuf_free(p);
+		return;
+	}
 
 	// copy the data into the buffer
-	pbuf_take(txBuf, (char*)&txData.txBuffer, txlen);
+	if (pbuf_take(txBuf, (char*)&txData.txBuffer, txlen) != ERR_OK)
+	{
+		pbuf_free(txBuf);
+		pbuf_free(p);
+		return;
+	}
 
 	// Connect to the remote client
 	udp_connect(upcb, addr, port);
