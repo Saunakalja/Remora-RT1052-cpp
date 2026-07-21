@@ -140,9 +140,6 @@ static double		dt;						// update_freq period in seconds  - (THIS IS RUNNING IN 
 static double 		recip_dt;				// recprocal of period, avoids divides
 
 static int32_t 		count[JOINTS] = { 0 };
-static int32_t 		old_count[JOINTS] = { 0 };
-static int32_t 		filter_count[JOINTS] = { 0 };
-static int32_t		accum_diff = 0;
 
 static int 			reset_gpio_pin = 25;				// debug pin
 
@@ -747,10 +744,6 @@ void pru_read()
 {
 	int i, ret;
 	double curr_pos;
-	
-	// following error spike filter parameters
-	int n = 2;
-	int M = 250;
 
 	// Data header
 	txData.header = PRU_READ;
@@ -772,23 +765,7 @@ void pru_read()
 
 					for (i = 0; i < JOINTS; i++)
 					{
-						old_count[i] = count[i];
 						count[i] = rxData.jointFeedback[i];
-						accum_diff = count[i] - old_count[i];
-						
-						// spike filter
-						if (abs(count[i] - old_count[i]) > M && filter_count[i] < n)
-						{
-							// recent big change: hold previous value
-							++filter_count[i];
-							count[i] = old_count[i];
-							rtapi_print("Spike filter active[%d][%d]: %d\n", i, filter_count[i], accum_diff);
-						}
-						else
-						{
-							// normal operation, or the big change must be real after all
-							filter_count[i] = 0;
-						}
 						
 						*(data->count[i]) = count[i];
 						*(data->pos_fb[i]) = (float)(count[i]) / data->pos_scale[i];
