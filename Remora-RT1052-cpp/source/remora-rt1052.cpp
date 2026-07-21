@@ -168,43 +168,69 @@ int8_t checkJson()
 {
 	metadata_t* meta = (metadata_t*)(XIP_BASE + JSON_UPLOAD_ADDRESS);
 	uint32_t* json = (uint32_t*)(XIP_BASE + JSON_UPLOAD_ADDRESS + METADATA_LEN);
+	const uint32_t jsonLength =
+		meta->jsonLength;
 
     uint32_t table[256];
     crc32::generate_table(table);
-    int mod, padding;
 
-	// Check length is reasonable
-	if (meta->length > 2 * SECTOR_SIZE)
+	if ((jsonLength == 0U) ||
+		(jsonLength > JSON_BUFF_SIZE))
 	{
 		newJson = false;
-		printf("JSON Config length incorrect\n");
+		printf("JSON Config byte length incorrect\n");
 		return -1;
 	}
 
-    // for compatibility with STM32 hardware CRC32, the config is padded to a 32 byte boundary
-    mod = meta->jsonLength % 4;
-    if (mod > 0)
-    {
-        padding = 4 - mod;
-    }
-    else
-    {
-        padding = 0;
-    }
-    printf("mod = %d, padding = %d\n", mod, padding);
+    // For compatibility with STM32 hardware CRC32, the config is padded to a 32-bit (4-byte) boundary.
+	const uint32_t paddedJsonLength =
+		(jsonLength + 3U) &
+		~uint32_t{3U};
+
+	const uint32_t padding =
+		paddedJsonLength - jsonLength;
+
+	if (paddedJsonLength > JSON_BUFF_SIZE)
+	{
+		newJson = false;
+		printf("JSON Config padded length incorrect\n");
+		return -1;
+	}
+
+	const uint32_t expectedWordLength =
+		paddedJsonLength /
+		sizeof(uint32_t);
+
+	if (meta->length != expectedWordLength)
+	{
+		newJson = false;
+		printf("JSON Config word length incorrect\n");
+		return -1;
+	}
 
 	// Compute CRC
     crc32 = 0;
     char* ptr = (char *)(XIP_BASE + JSON_UPLOAD_ADDRESS + METADATA_LEN);
-    for (int i = 0; i < meta->jsonLength + padding; i++)
+    for (uint32_t i = 0;
+		 i < paddedJsonLength;
+		 i++)
     {
         crc32 = crc32::update(table, crc32, ptr, 1);
         ptr++;
     }
 
-	printf("Length (words) = %d\n", meta->length);
-	printf("JSON length (bytes) = %d\n", meta->jsonLength);
-	printf("crc32 = %x\n", crc32);
+	printf(
+		"Length (words) = %lu\n",
+		static_cast<unsigned long>(meta->length));
+	printf(
+		"JSON length (bytes) = %lu\n",
+		static_cast<unsigned long>(jsonLength));
+	printf(
+		"Padding = %lu\n",
+		static_cast<unsigned long>(padding));
+	printf(
+		"Calculated crc32 = %lx\n",
+		static_cast<unsigned long>(crc32));
 
 	// Check CRC
 	if (crc32 != meta->crc32)
