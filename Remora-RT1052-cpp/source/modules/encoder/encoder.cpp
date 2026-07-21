@@ -38,9 +38,22 @@ void createEncoder()
 ************************************************************************/
 
 Encoder::Encoder(volatile float &ptrEncoderCount, std::string ChA, std::string ChB) :
-	ptrEncoderCount(&ptrEncoderCount),
 	ChA(ChA),
-	ChB(ChB)
+	ChB(ChB),
+	Index(),
+	hasIndex(false),
+	ptrData(nullptr),
+	bitNumber(0),
+	mask(0),
+	ptrEncoderCount(&ptrEncoderCount),
+	state(0),
+	count(0),
+	indexCount(0),
+	indexPulse(0),
+	pulseCount(0),
+	pinA(nullptr),
+	pinB(nullptr),
+	pinI(nullptr)
 {
 	this->pinA = new Pin(this->ChA, INPUT);			// create Pin
     this->pinB = new Pin(this->ChB, INPUT);			// create Pin
@@ -55,18 +68,25 @@ Encoder::Encoder(volatile float &ptrEncoderCount, std::string ChA, std::string C
     {
         this->state |= 2U;
     }
-
-    this->hasIndex = false;
-	this->count = 0;								// initialise the count to 0
 }
 
 Encoder::Encoder(volatile float &ptrEncoderCount, volatile uint32_t &ptrData, int bitNumber, std::string ChA, std::string ChB, std::string Index) :
-	ptrEncoderCount(&ptrEncoderCount),
-    ptrData(&ptrData),
-    bitNumber(bitNumber),
 	ChA(ChA),
 	ChB(ChB),
-    Index(Index)
+	Index(Index),
+	hasIndex(true),
+	ptrData(&ptrData),
+	bitNumber(bitNumber),
+	mask(0),
+	ptrEncoderCount(&ptrEncoderCount),
+	state(0),
+	count(0),
+	indexCount(0),
+	indexPulse(0),
+	pulseCount(0),
+	pinA(nullptr),
+	pinB(nullptr),
+	pinI(nullptr)
 {
 	this->pinA = new Pin(this->ChA, INPUT);			// create Pin
     this->pinB = new Pin(this->ChB, INPUT);			// create Pin
@@ -83,11 +103,7 @@ Encoder::Encoder(volatile float &ptrEncoderCount, volatile uint32_t &ptrData, in
     }
 
     this->pinI = new Pin(this->Index, INPUT);		// create Pin
-    this->hasIndex = true;
     this->indexPulse = (PRU_BASEFREQ / PRU_SERVOFREQ) * 3;          // output the index pulse for 3 servo thread periods so LinuxCNC sees it
-    this->indexCount = 0;
-	this->count = 0;								                // initialise the count to 0
-    this->pulseCount = 0;                                           // number of base thread periods to pulse the index output    
     this->mask = uint32_t{1} << this->bitNumber;
 }
 
