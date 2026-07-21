@@ -829,6 +829,35 @@ void loadModules(void)
             return;
         }
 
+        if (!strcmp(thread,"DMA") &&
+            !strcmp(type,"DMAstepgen"))
+        {
+            JsonVariantConst jointValue =
+                moduleObject["Joint Number"];
+
+            if (!jointValue.is<uint32_t>())
+            {
+                printf(
+                    "DMAstepgen module entry %lu joint number is missing or is not an unsigned integer\n",
+                    static_cast<unsigned long>(moduleIndex));
+                configError = true;
+                return;
+            }
+
+            const uint32_t jointNumber =
+                jointValue.as<uint32_t>();
+
+            if (jointNumber >= JOINTS)
+            {
+                printf(
+                    "DMAstepgen module entry %lu joint number %lu is out of range\n",
+                    static_cast<unsigned long>(moduleIndex),
+                    static_cast<unsigned long>(jointNumber));
+                configError = true;
+                return;
+            }
+        }
+
         if (!strcmp(thread,"Base") &&
             !strcmp(type,"Stepgen"))
         {
