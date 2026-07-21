@@ -31,6 +31,7 @@ static uint32_t Flash_Write_Address;
 static struct udp_pcb *UDPpcb;
 static __IO uint32_t total_count=0;
 static edma_handle_t edma_handle;
+extern bool threadsRunning;
 
 
 /* Private function prototypes -----------------------------------------------*/
@@ -307,10 +308,43 @@ static int IAP_tftp_process_write(struct udp_pcb *upcb, const ip_addr_t *to, int
 
   // Get ready to upload configuration
 
-  // Stop the threads
-  printf("\nReceiving new configuration. Stopping threads..\n");
-  if (hasBaseThread) baseThread->stopThread();
-  if (hasServoThread) servoThread->stopThread();
+  printf(
+      "\nReceiving new configuration. "
+      "Clearing outputs and stopping threads..\n");
+
+  {
+      int remaining = sizeof(rxData.rxBuffer);
+
+      while (remaining-- > 0)
+      {
+          rxData.rxBuffer[remaining] = 0;
+      }
+  }
+
+  if (threadsRunning)
+  {
+      if (hasBaseThread)
+      {
+          baseThread->stopThread();
+      }
+
+      if (hasServoThread)
+      {
+          servoThread->stopThread();
+      }
+
+      if (hasBaseThread)
+      {
+          baseThread->run();
+      }
+
+      if (hasServoThread)
+      {
+          servoThread->run();
+      }
+
+      threadsRunning = false;
+  }
 
   if (hasDMAthread && DMAthreadRunning)
   {
@@ -320,6 +354,12 @@ static int IAP_tftp_process_write(struct udp_pcb *upcb, const ip_addr_t *to, int
 
 	  DMAMUX_DisableChannel(DMAMUX, 0);
 	  DMAMUX_Deinit(DMAMUX);
+
+	  DMAthreadRunning = false;
+	  DMA::DMAtransferDone = false;
+
+	  // Apply the disabled state once after DMA has stopped.
+	  dmaThread->run();
   }
 
   if (hasQDC)
