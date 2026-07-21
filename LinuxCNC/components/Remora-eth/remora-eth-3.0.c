@@ -159,7 +159,7 @@ RTAPI_MP_INT(PRU_base_freq, "PRU base thread frequency");
 #define RECV_TIMEOUT_US 10
 #define READ_PCK_DELAY_NS 10000
 
-static int udpSocket;
+static int udpSocket = -1;
 static int errCount;
 struct sockaddr_in dstAddr, srcAddr;
 struct hostent *server;
@@ -170,6 +170,7 @@ static const char *dstAddress = "10.10.10.10";
 ************************************************************************/
 
 static int UDP_init(void);
+static void UDP_close(void);
 
 static void update_freq(void *arg, long period);
 static void pru_write();
@@ -235,6 +236,7 @@ int rtapi_app_main(void)
 	if (UDP_init() < 0)
 	{
 		rtapi_print_msg(RTAPI_MSG_ERR, "Error: The board is unreachable\n");
+		hal_exit(comp_id);
 		return -1;
 	}
 
@@ -379,6 +381,7 @@ This is throwing errors from axis.py for some reason...
 		rtapi_print_msg(RTAPI_MSG_ERR,
 		        "%s: ERROR: pin export failed with err=%i\n",
 		        modname, retval);
+		UDP_close();
 		hal_exit(comp_id);
 		return -1;
 	}
@@ -390,6 +393,7 @@ This is throwing errors from axis.py for some reason...
 	if (retval < 0) {
 		rtapi_print_msg(RTAPI_MSG_ERR,
 		        "%s: ERROR: update function export failed\n", modname);
+		UDP_close();
 		hal_exit(comp_id);
 		return -1;
 	}
@@ -400,6 +404,7 @@ This is throwing errors from axis.py for some reason...
 	if (retval < 0) {
 		rtapi_print_msg(RTAPI_MSG_ERR,
 		        "%s: ERROR: write function export failed\n", modname);
+		UDP_close();
 		hal_exit(comp_id);
 		return -1;
 	}
@@ -409,6 +414,7 @@ This is throwing errors from axis.py for some reason...
 	if (retval < 0) {
 		rtapi_print_msg(RTAPI_MSG_ERR,
 		        "%s: ERROR: read function export failed\n", modname);
+		UDP_close();
 		hal_exit(comp_id);
 		return -1;
 	}
@@ -420,10 +426,7 @@ This is throwing errors from axis.py for some reason...
 
 void rtapi_app_exit(void)
 {
-	int ret = shutdown(udpSocket, SHUT_RDWR);
-	if (ret < 0)
-      rtapi_print("ERROR: can't close socket: %s\n", strerror(errno));
-	
+	UDP_close();
     hal_exit(comp_id);
 }
 
@@ -431,6 +434,21 @@ void rtapi_app_exit(void)
 /***********************************************************************
 *                   LOCAL FUNCTION DEFINITIONS                         *
 ************************************************************************/
+
+static void UDP_close(void)
+{
+	if (udpSocket >= 0)
+	{
+		if (close(udpSocket) < 0)
+		{
+			rtapi_print(
+				"ERROR: can't close socket: %s\n",
+				strerror(errno));
+		}
+
+		udpSocket = -1;
+	}
+}
 
 int UDP_init(void)
 {
@@ -440,8 +458,13 @@ int UDP_init(void)
 	udpSocket = socket(PF_INET, SOCK_DGRAM, IPPROTO_UDP);
 	if (udpSocket < 0)
 	{
-		rtapi_print("ERROR: can't open socket: %s\n", strerror(errno));
-		return -errno;
+		int saved_errno = errno;
+
+		rtapi_print(
+			"ERROR: can't open socket: %s\n",
+			strerror(saved_errno));
+
+		return -saved_errno;
 	}
 
 	bzero((char*) &dstAddr, sizeof(dstAddr));
@@ -458,16 +481,28 @@ int UDP_init(void)
 	ret = bind(udpSocket, (struct sockaddr *) &srcAddr, sizeof(srcAddr));
 	if (ret < 0)
 	{
-		rtapi_print("ERROR: can't bind: %s\n", strerror(errno));
-		return -errno;
+		int saved_errno = errno;
+
+		rtapi_print(
+			"ERROR: can't bind: %s\n",
+			strerror(saved_errno));
+
+		UDP_close();
+		return -saved_errno;
 	}
 	
 	// Connect to send and receive only to the server_addr
 	ret = connect(udpSocket, (struct sockaddr*) &dstAddr, sizeof(struct sockaddr_in));
 	if (ret < 0)
 	{
-		rtapi_print("ERROR: can't connect: %s\n", strerror(errno));
-		return -errno;
+		int saved_errno = errno;
+
+		rtapi_print(
+			"ERROR: can't connect: %s\n",
+			strerror(saved_errno));
+
+		UDP_close();
+		return -saved_errno;
 	}
 
 	struct timeval timeout;
@@ -476,18 +511,26 @@ int UDP_init(void)
 
 	ret = setsockopt(udpSocket, SOL_SOCKET, SO_RCVTIMEO, (char*) &timeout, sizeof(timeout));
 	if (ret < 0) {
-	rtapi_print("ERROR: can't set receive timeout socket option: %s\n",
-		strerror(errno));
-	return -errno;
+		int saved_errno = errno;
+
+		rtapi_print("ERROR: can't set receive timeout socket option: %s\n",
+			strerror(saved_errno));
+
+		UDP_close();
+		return -saved_errno;
 	}
 
 	timeout.tv_usec = SEND_TIMEOUT_US;
 	ret = setsockopt(udpSocket, SOL_SOCKET, SO_SNDTIMEO, (char*) &timeout,
 	  sizeof(timeout));
 	if (ret < 0) {
-	rtapi_print("ERROR: can't set send timeout socket option: %s\n",
-		strerror(errno));
-	return -errno;
+		int saved_errno = errno;
+
+		rtapi_print("ERROR: can't set send timeout socket option: %s\n",
+			strerror(saved_errno));
+
+		UDP_close();
+		return -saved_errno;
 	}
 
 	return 0;
