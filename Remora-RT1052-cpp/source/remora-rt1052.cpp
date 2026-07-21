@@ -709,10 +709,134 @@ void loadModules(void)
 
     if (configError) return;
 
-    JsonArray Modules = doc["Modules"];
+    if (!doc.containsKey("Modules"))
+    {
+        printf("No configured modules found\n");
+        return;
+    }
+
+    JsonVariantConst modulesValue =
+        doc["Modules"];
+
+    if (!modulesValue.is<JsonArrayConst>())
+    {
+        printf("Modules configuration is not an array\n");
+        configError = true;
+        return;
+    }
+
+    JsonArrayConst Modules =
+        modulesValue.as<JsonArrayConst>();
+
+    uint32_t moduleIndex = 0U;
+    for (JsonArrayConst::iterator it=Modules.begin(); it!=Modules.end(); ++it)
+    {
+        JsonVariantConst moduleValue =
+            *it;
+
+        if (!moduleValue.is<JsonObjectConst>())
+        {
+            printf(
+                "Module entry %lu is not an object\n",
+                static_cast<unsigned long>(moduleIndex));
+            configError = true;
+            return;
+        }
+
+        JsonObjectConst moduleObject =
+            moduleValue.as<JsonObjectConst>();
+
+        JsonVariantConst threadValue =
+            moduleObject["Thread"];
+
+        if (!threadValue.is<const char*>())
+        {
+            printf(
+                "Module entry %lu thread is missing or is not a string\n",
+                static_cast<unsigned long>(moduleIndex));
+            configError = true;
+            return;
+        }
+
+        const char* thread =
+            threadValue.as<const char*>();
+
+        if ((thread == nullptr) ||
+            (thread[0] == '\0'))
+        {
+            printf(
+                "Module entry %lu thread is empty\n",
+                static_cast<unsigned long>(moduleIndex));
+            configError = true;
+            return;
+        }
+
+        JsonVariantConst typeValue =
+            moduleObject["Type"];
+
+        if (!typeValue.is<const char*>())
+        {
+            printf(
+                "Module entry %lu type is missing or is not a string\n",
+                static_cast<unsigned long>(moduleIndex));
+            configError = true;
+            return;
+        }
+
+        const char* type =
+            typeValue.as<const char*>();
+
+        if ((type == nullptr) ||
+            (type[0] == '\0'))
+        {
+            printf(
+                "Module entry %lu type is empty\n",
+                static_cast<unsigned long>(moduleIndex));
+            configError = true;
+            return;
+        }
+
+        bool supportedCombination = false;
+
+        if (!strcmp(thread,"DMA"))
+        {
+            supportedCombination =
+                !strcmp(type,"DMAstepgen");
+        }
+        else if (!strcmp(thread,"Base"))
+        {
+            supportedCombination =
+                (!strcmp(type,"Stepgen") ||
+                 !strcmp(type,"Encoder") ||
+                 !strcmp(type,"QDC"));
+        }
+        else if (!strcmp(thread,"Servo"))
+        {
+            supportedCombination =
+                (!strcmp(type,"Digital Pin") ||
+                 !strcmp(type,"Spindle PWM") ||
+                 !strcmp(type,"NVMPG"));
+        }
+
+        if (!supportedCombination)
+        {
+            printf(
+                "Unsupported module entry %lu: thread %s, type %s\n",
+                static_cast<unsigned long>(moduleIndex),
+                thread,
+                type);
+            configError = true;
+            return;
+        }
+
+        moduleIndex++;
+    }
+
+    JsonArray mutableModules =
+        doc["Modules"].as<JsonArray>();
 
     // create objects from JSON data
-    for (JsonArray::iterator it=Modules.begin(); it!=Modules.end(); ++it)
+    for (JsonArray::iterator it=mutableModules.begin(); it!=mutableModules.end(); ++it)
     {
         module = *it;
 
@@ -722,39 +846,40 @@ void loadModules(void)
         if (!strcmp(thread,"DMA"))
         {
             printf("\nDMA thread object\n");
-            hasDMAthread = true;
 
             if (!strcmp(type,"DMAstepgen"))
             {
             	createDMAstepgen();
             	DMAstepgen = true;
+                hasDMAthread = true;
             }
         }
         else if (!strcmp(thread,"Base"))
         {
             printf("\nBase thread object\n");
-            hasBaseThread = true;
 
             if (!strcmp(type,"Stepgen"))
             {
                 createStepgen();
+                hasBaseThread = true;
             }
             else if (!strcmp(type,"Encoder"))
             {
                 createEncoder();
+                hasBaseThread = true;
             }
             else if (!strcmp(type,"QDC"))
             {
                 if (createQdc())
                 {
                     hasQDC = true;
+                    hasBaseThread = true;
                 }
             }
          }
         else if (!strcmp(thread,"Servo"))
         {
             printf("\nServo thread object\n");
-            hasServoThread = true;
 
         	if (!strcmp(type,"Digital Pin"))
 			{
