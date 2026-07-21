@@ -20,6 +20,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "tftpserver.h"
 #include "flexspi_nor_flash.h"
+#include "lwip/timeouts.h"
 #include <string.h>
 #include <stdio.h>
 #include "configuration.h"
@@ -45,6 +46,9 @@ static void IAP_tftp_recv_callback(void *arg, struct udp_pcb *Upcb, struct pbuf 
                         const ip_addr_t *addr, u16_t port);
 
 static void IAP_tftp_cleanup_wr(struct udp_pcb *upcb, tftp_connection_args *args);
+static void IAP_tftp_timeout(void *arg);
+static void IAP_tftp_arm_timeout(
+    tftp_connection_args *args);
 static void IAP_tftp_restore_execution(
     bool restoreThreads,
     bool restoreDMA,
@@ -154,6 +158,61 @@ static err_t IAP_tftp_send_ack_packet(struct udp_pcb *upcb, const ip_addr_t *to,
   pbuf_free(pkt_buf);
 
   return err;
+}
+
+
+static void IAP_tftp_arm_timeout(
+    tftp_connection_args *args)
+{
+    if (args == nullptr)
+    {
+        return;
+    }
+
+    sys_untimeout(
+        IAP_tftp_timeout,
+        args);
+
+    sys_timeout(
+        TFTP_TIMEOUT_INTERVAL * 1000U,
+        IAP_tftp_timeout,
+        args);
+}
+
+
+static void IAP_tftp_timeout(void *arg)
+{
+    if (arg == nullptr)
+    {
+        return;
+    }
+
+    tftp_connection_args *args =
+        static_cast<tftp_connection_args *>(arg);
+
+    struct udp_pcb *upcb =
+        args->upcb;
+
+    const bool restoreThreads =
+        args->restoreThreads;
+
+    const bool restoreDMA =
+        args->restoreDMA;
+
+    const bool restoreQdc =
+        args->restoreQdc;
+
+    PRINTF(
+        "TFTP configuration upload timed out !\r\n");
+
+    IAP_tftp_cleanup_wr(
+        upcb,
+        args);
+
+    IAP_tftp_restore_execution(
+        restoreThreads,
+        restoreDMA,
+        restoreQdc);
 }
 
 
@@ -321,6 +380,9 @@ static void IAP_wrq_recv_callback(void *_args, struct udp_pcb *upcb, struct pbuf
   }
   else
   {
+    IAP_tftp_arm_timeout(
+        args);
+
     pbuf_free(pkt_buf);
     return;
   }
@@ -404,6 +466,7 @@ static int IAP_tftp_process_write(struct udp_pcb *upcb, const ip_addr_t *to, int
   /* the block # used as a positive response to a WRQ is _always_ 0!!! (see RFC1350)  */
   args->block = 0;
   args->tot_bytes = 0;
+  args->upcb = upcb;
 
   const bool restoreThreads =
       threadsRunning;
@@ -557,6 +620,9 @@ static int IAP_tftp_process_write(struct udp_pcb *upcb, const ip_addr_t *to, int
       return ackStatus;
   }
 
+  IAP_tftp_arm_timeout(
+      args);
+
   return 0;
 }
 
@@ -634,6 +700,13 @@ static void IAP_tftp_recv_callback(void *arg, struct udp_pcb *upcb, struct pbuf 
   */
 static void IAP_tftp_cleanup_wr(struct udp_pcb *upcb, tftp_connection_args *args)
 {
+  if (args != nullptr)
+  {
+    sys_untimeout(
+        IAP_tftp_timeout,
+        args);
+  }
+
   /* Free the tftp_connection_args structure */
   mem_free(args);
 

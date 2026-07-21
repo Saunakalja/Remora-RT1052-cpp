@@ -53,12 +53,10 @@ typedef struct
   int block;
   /* total number of bytes transferred */
   int tot_bytes;
+  struct udp_pcb* upcb;
   bool restoreThreads;
   bool restoreDMA;
   bool restoreQdc;
-  /* timer interrupt count when last packet was sent */
-  /* this should be used to resend packets on timeout */
-  unsigned long long last_time;
  
 }tftp_connection_args;
 
