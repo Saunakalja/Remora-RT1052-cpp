@@ -308,20 +308,27 @@ static int IAP_tftp_process_write(struct udp_pcb *upcb, const ip_addr_t *to, int
 
   Flash_Write_Address = JSON_UPLOAD_ADDRESS;
 
-  /* erase user flash area - 2 sectors [2 x 4KB] */
+  /* erase user flash area for metadata and JSON payload */
   ////FLASH_If_Erase(JSON_UPLOAD_ADDRESS);
-  status = flexspi_nor_flash_erase_sector(FLEXSPI, Flash_Write_Address);
-  if (status != kStatus_Success)
-  {
-      PRINTF("Erase sector failure !\r\n");
-      return -1;
-  }
+  const uint32_t uploadSize =
+      JSON_BUFF_SIZE + METADATA_LEN;
 
-  status = flexspi_nor_flash_erase_sector(FLEXSPI, Flash_Write_Address + SECTOR_SIZE);
-  if (status != kStatus_Success)
+  const uint32_t uploadSectors =
+      (uploadSize + SECTOR_SIZE - 1U) / SECTOR_SIZE;
+
+  for (uint32_t sector = 0;
+       sector < uploadSectors;
+       sector++)
   {
-      PRINTF("Erase sector failure !\r\n");
-      return -1;
+      status = flexspi_nor_flash_erase_sector(
+          FLEXSPI,
+          Flash_Write_Address + sector * SECTOR_SIZE);
+
+      if (status != kStatus_Success)
+      {
+          PRINTF("Erase sector failure !\r\n");
+          return -1;
+      }
   }
 
   /* initiate the write transaction by sending the first ack */

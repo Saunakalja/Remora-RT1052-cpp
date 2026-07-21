@@ -33,6 +33,7 @@
 #define LED 				"P3_00"
 
 #define JSON_BUFF_SIZE	    12500			// Jason dynamic buffer size
+#define METADATA_LEN        512U
 
 // Location for storage of JSON config file in Flash
 #define XIP_BASE						0x60000000

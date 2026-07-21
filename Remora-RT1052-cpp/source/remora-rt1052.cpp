@@ -153,7 +153,6 @@ typedef struct
   uint32_t jsonLength;  	// length in of JSON config in bytes
   uint8_t padding[500];
 } metadata_t;
-#define METADATA_LEN    512 // 512 bytes of metadata in front of actual JSON file
 
 volatile bool newJson;
 uint32_t crc32;
