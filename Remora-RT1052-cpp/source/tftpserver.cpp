@@ -731,7 +731,6 @@ static void IAP_tftp_cleanup_wr(struct udp_pcb *upcb, tftp_connection_args *args
 void IAP_tftpd_init(edma_handle_t handle)
 {
   edma_handle = handle;
-  err_t err;
   unsigned port = 69; /* 69 is the port used for TFTP protocol initial transaction */
 
   /* create a new UDP PCB structure  */
@@ -739,16 +738,37 @@ void IAP_tftpd_init(edma_handle_t handle)
   if (!UDPpcb)
   {
     /* Error creating PCB. Out of Memory  */
+    PRINTF(
+        "Failed to allocate TFTP UDP PCB !\r\n");
     return;
   }
 
   /* Bind this PCB to port 69  */
-  err = udp_bind(UDPpcb, IP_ADDR_ANY, port);
-  if (err == ERR_OK)
+  const err_t bindStatus =
+      udp_bind(
+          UDPpcb,
+          IP_ADDR_ANY,
+          port);
+
+  if (bindStatus != ERR_OK)
   {
-    /* Initialize receive callback function  */
-    udp_recv(UDPpcb, IAP_tftp_recv_callback, NULL);
+    PRINTF(
+        "Failed to bind TFTP UDP PCB to port 69 !\r\n");
+
+    udp_remove(
+        UDPpcb);
+
+    UDPpcb =
+        nullptr;
+
+    return;
   }
+
+  /* Initialize receive callback function  */
+  udp_recv(
+      UDPpcb,
+      IAP_tftp_recv_callback,
+      nullptr);
 }
 
 /************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/
