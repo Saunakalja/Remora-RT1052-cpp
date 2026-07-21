@@ -146,6 +146,9 @@ volatile mpgData_t* ptrMpgData = &mpgData;
 // JSON config file stuff
 
 const char defaultConfig[] = DEFAULT_CONFIG;
+static_assert(
+	sizeof(defaultConfig) <= JSON_BUFF_SIZE,
+	"Default JSON configuration exceeds JSON buffer");
 
 typedef struct
 {
@@ -409,44 +412,55 @@ void moveJson()
 }
 
 
-void jsonFromFlash(std::string json)
+void jsonFromFlash()
 {
-    int c;
-    uint32_t i = 0;
-    uint32_t jsonLength;
-
-
     printf("\n1. Loading JSON configuration file from Flash memory\n");
 
-    // read word 0 to determine length to read
-    jsonLength = *(uint32_t*)(XIP_BASE + JSON_STORAGE_ADDRESS);
+	strJson.clear();
 
-    if (jsonLength == 0xFFFFFFFF)
+    // read word 0 to determine length to read
+    const uint32_t storedJsonLength =
+		*reinterpret_cast<const uint32_t*>(
+			XIP_BASE +
+			JSON_STORAGE_ADDRESS);
+
+    if (storedJsonLength == 0xFFFFFFFFU)
     {
     	printf("Flash storage location is empty - no config file\n");
-    	printf("Using basic default configuration - 3 step generators only\n");
+        printf("Using basic default configuration - 3 step generators only\n");
 
-    	jsonLength = sizeof(defaultConfig);
+		strJson.assign(
+			defaultConfig,
+			sizeof(defaultConfig));
+    }
+    else if ((storedJsonLength == 0U) ||
+			 (storedJsonLength > JSON_BUFF_SIZE))
+    {
+		printf(
+			"Stored JSON length invalid: %lu\n",
+			static_cast<unsigned long>(storedJsonLength));
+        printf("Using basic default configuration - 3 step generators only\n");
 
-    	json.resize(jsonLength);
-
-		for (i = 0; i < jsonLength; i++)
-		{
-			c = defaultConfig[i];
-			strJson.push_back(c);
-		}
+		strJson.assign(
+			defaultConfig,
+			sizeof(defaultConfig));
     }
     else
     {
-		json.resize(jsonLength);
+		const char* storedJson =
+			reinterpret_cast<const char*>(
+				XIP_BASE +
+				JSON_STORAGE_ADDRESS +
+				sizeof(uint32_t));
 
-		for (i = 0; i < jsonLength; i++)
-		{
-			c = *(uint8_t*)(XIP_BASE + JSON_STORAGE_ADDRESS + 4 + i);
-			strJson.push_back(c);
-		}
-		printf("\n%s\n", json.c_str());
+		strJson.assign(
+			storedJson,
+			storedJsonLength);
     }
+
+	printf(
+		"\n%s\n",
+		strJson.c_str());
 }
 
 
@@ -633,7 +647,7 @@ int main(void)
      		              }
      		              prevState = currentState;
 
-     		              jsonFromFlash(strJson);
+                          jsonFromFlash();
      		              deserialiseJSON();
 						  getBoardType();
      		              configThreads();
