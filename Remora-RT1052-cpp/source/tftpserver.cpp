@@ -32,6 +32,8 @@ static uint32_t Flash_Write_Address;
 static struct udp_pcb *UDPpcb;
 static __IO uint32_t total_count=0;
 static edma_handle_t edma_handle;
+static bool tftpTransferActive =
+    false;
 extern bool threadsRunning;
 
 
@@ -664,6 +666,17 @@ static void IAP_tftp_recv_callback(void *arg, struct udp_pcb *upcb, struct pbuf 
     return;
   }
 
+  if (tftpTransferActive)
+  {
+    PRINTF(
+        "TFTP configuration upload already active !\r\n");
+
+    pbuf_free(
+        pkt_buf);
+
+    return;
+  }
+
   /* create new UDP PCB structure */
   upcb_tftp_data = udp_new();
   if (!upcb_tftp_data)
@@ -685,6 +698,9 @@ static void IAP_tftp_recv_callback(void *arg, struct udp_pcb *upcb, struct pbuf 
     pbuf_free(pkt_buf);
     return;
   }
+
+  tftpTransferActive =
+      true;
 
   /* Start the TFTP write mode*/
   IAP_tftp_process_write(upcb_tftp_data, addr, port);
@@ -715,6 +731,9 @@ static void IAP_tftp_cleanup_wr(struct udp_pcb *upcb, tftp_connection_args *args
 
   /* close the connection */
   udp_remove(upcb);
+
+  tftpTransferActive =
+      false;
 
   /* reset the callback function */
   udp_recv(UDPpcb, IAP_tftp_recv_callback, NULL);
