@@ -51,8 +51,8 @@ class Qdc : public Module
         uint8_t state;
         int32_t count;
         volatile int32_t indexCount;
-        int8_t  indexPulse;
-        int8_t  pulseCount;
+        uint32_t indexPulse;
+        uint32_t pulseCount;
         volatile bool indexDetected;
 
 	public:

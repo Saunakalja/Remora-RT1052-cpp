@@ -354,7 +354,7 @@ Qdc::Qdc(volatile float &ptrEncoderCount, volatile uint32_t &ptrData, ENC_Type* 
     this->indexPulse = (PRU_BASEFREQ / PRU_SERVOFREQ) * 3;          // output the index pulse for 3 servo thread periods so LinuxCNC sees it
     this->indexCount = 0;
     this->count = 0;								                // initialise the count to 0
-    this->pulseCount = 0;                                           // number of base thread periods to pulse the index output
+    this->pulseCount = 0U;                                          // number of base thread periods to pulse the index output
     this->mask =
         uint32_t{1} << this->bitNumber;
     this->indexDetected = false;
@@ -369,7 +369,7 @@ void Qdc::update()
       bool indexCaptured = false;
       int32_t capturedIndexCount = 0;
 
-      if (this->pulseCount == 0)
+      if (this->pulseCount == 0U)
       {
           DisableIRQ(this->irq);
 
@@ -395,7 +395,7 @@ void Qdc::update()
           this->pulseCount = this->indexPulse;
           *(this->ptrData) |= this->mask;                 // set bit in data source high
       }
-      else if (this->pulseCount > 0)                      // maintain both index output and encoder count for the latch period
+      else if (this->pulseCount > 0U)                     // maintain both index output and encoder count for the latch period
       {
           this->pulseCount--;                             // decrement the counter
       }
