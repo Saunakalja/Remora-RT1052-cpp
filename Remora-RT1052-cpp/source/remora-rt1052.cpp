@@ -535,27 +535,166 @@ void configThreads()
 
     printf("\n4. Configuring threads\n");
 
-    JsonArray Threads = doc["Threads"];
+    if (!doc.containsKey("Threads"))
+    {
+        return;
+    }
+
+    JsonVariantConst threadsValue =
+        doc["Threads"];
+
+    if (!threadsValue.is<JsonArrayConst>())
+    {
+        printf("Threads configuration is not an array\n");
+        configError = true;
+        return;
+    }
+
+    uint32_t configuredBaseFreq =
+        base_freq;
+
+    uint32_t configuredServoFreq =
+        servo_freq;
+
+    bool baseConfigured = false;
+    bool servoConfigured = false;
+
+    const uint32_t timerClock =
+        CLOCK_GetFreq(
+            kCLOCK_PerClk);
+
+    if (timerClock == 0U)
+    {
+        printf("Timer peripheral clock is zero\n");
+        configError = true;
+        return;
+    }
+
+    JsonArrayConst Threads =
+        threadsValue.as<JsonArrayConst>();
 
     // create objects from JSON data
-    for (JsonArray::iterator it=Threads.begin(); it!=Threads.end(); ++it)
+    uint32_t threadIndex = 0U;
+    for (JsonArrayConst::iterator it=Threads.begin(); it!=Threads.end(); ++it)
     {
-        thread = *it;
+        JsonVariantConst threadValue =
+            *it;
 
-        const char* configor = thread["Thread"];
-        uint32_t    freq = thread["Frequency"];
+        if (!threadValue.is<JsonObjectConst>())
+        {
+            printf(
+                "Thread entry %lu is not an object\n",
+                static_cast<unsigned long>(threadIndex));
+            configError = true;
+            return;
+        }
+
+        JsonObjectConst threadObject =
+            threadValue.as<JsonObjectConst>();
+
+        JsonVariantConst threadNameValue =
+            threadObject["Thread"];
+
+        if (!threadNameValue.is<const char*>())
+        {
+            printf(
+                "Thread entry %lu name is missing or is not a string\n",
+                static_cast<unsigned long>(threadIndex));
+            configError = true;
+            return;
+        }
+
+        const char* configor =
+            threadNameValue.as<const char*>();
+
+        if ((configor == nullptr) ||
+            (configor[0] == '\0'))
+        {
+            printf(
+                "Thread entry %lu name is empty\n",
+                static_cast<unsigned long>(threadIndex));
+            configError = true;
+            return;
+        }
+
+        JsonVariantConst frequencyValue =
+            threadObject["Frequency"];
+
+        if (!frequencyValue.is<uint32_t>())
+        {
+            printf(
+                "Thread entry %lu frequency is missing or is not an unsigned integer\n",
+                static_cast<unsigned long>(threadIndex));
+            configError = true;
+            return;
+        }
+
+        const uint32_t frequency =
+            frequencyValue.as<uint32_t>();
+
+        if ((frequency == 0U) ||
+            (frequency > timerClock))
+        {
+            printf(
+                "Thread entry %lu frequency %lu is invalid\n",
+                static_cast<unsigned long>(threadIndex),
+                static_cast<unsigned long>(frequency));
+            configError = true;
+            return;
+        }
 
         if (!strcmp(configor,"Base"))
         {
-            base_freq = freq;
-            printf("Setting BASE thread frequency to %d\n", base_freq);
+            if (baseConfigured)
+            {
+                printf("Duplicate Base thread configuration\n");
+                configError = true;
+                return;
+            }
+
+            configuredBaseFreq =
+                frequency;
+
+            baseConfigured = true;
         }
         else if (!strcmp(configor,"Servo"))
         {
-            servo_freq = freq;
-            printf("Setting SERVO thread frequency to %d\n", servo_freq);
+            if (servoConfigured)
+            {
+                printf("Duplicate Servo thread configuration\n");
+                configError = true;
+                return;
+            }
+
+            configuredServoFreq =
+                frequency;
+
+            servoConfigured = true;
         }
+        else
+        {
+            printf(
+                "Unknown thread configuration: %s\n",
+                configor);
+            configError = true;
+            return;
+        }
+
+        threadIndex++;
     }
+
+    base_freq =
+        configuredBaseFreq;
+
+    servo_freq =
+        configuredServoFreq;
+
+    printf(
+        "Setting BASE thread frequency to %lu\n",
+        static_cast<unsigned long>(base_freq));
+    printf(
+        "Setting SERVO thread frequency to %lu\n",
+        static_cast<unsigned long>(servo_freq));
 }
 
 
