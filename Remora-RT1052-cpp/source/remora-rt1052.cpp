@@ -776,6 +776,12 @@ void loadModules(void)
     JsonArrayConst Modules =
         modulesValue.as<JsonArrayConst>();
 
+    bool spindlePwmConfigured =
+        false;
+
+    bool nvmpgConfigured =
+        false;
+
     uint32_t moduleIndex = 0U;
     for (JsonArrayConst::iterator it=Modules.begin(); it!=Modules.end(); ++it)
     {
@@ -1343,6 +1349,15 @@ void loadModules(void)
         if (!strcmp(thread,"Servo") &&
             !strcmp(type,"Spindle PWM"))
         {
+            if (spindlePwmConfigured)
+            {
+                printf(
+                    "Spindle PWM module entry %lu duplicates the fixed Spindle PWM hardware\n",
+                    static_cast<unsigned long>(moduleIndex));
+                configError = true;
+                return;
+            }
+
             JsonVariantConst setPointValue =
                 moduleObject["SP[i]"];
 
@@ -1367,6 +1382,25 @@ void loadModules(void)
                 configError = true;
                 return;
             }
+
+            spindlePwmConfigured =
+                true;
+        }
+
+        if (!strcmp(thread,"Servo") &&
+            !strcmp(type,"NVMPG"))
+        {
+            if (nvmpgConfigured)
+            {
+                printf(
+                    "NVMPG module entry %lu duplicates the fixed NVMPG hardware\n",
+                    static_cast<unsigned long>(moduleIndex));
+                configError = true;
+                return;
+            }
+
+            nvmpgConfigured =
+                true;
         }
 
         moduleIndex++;

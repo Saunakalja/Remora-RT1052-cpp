@@ -8,8 +8,16 @@
 
 void createNVMPG()
 {
-    const char* comment = module["Comment"];
-    printf("\n%s\n",comment);
+    const char* comment =
+        module["Comment"];
+
+    if ((comment != nullptr) &&
+        (comment[0] != '\0'))
+    {
+        printf(
+            "\n%s\n",
+            comment);
+    }
 
     ptrNVMPGInputs = &txData.NVMPGinputs;
     MPG = new NVMPG(*ptrMpgData, *ptrNVMPGInputs);
