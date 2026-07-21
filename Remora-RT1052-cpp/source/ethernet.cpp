@@ -106,6 +106,7 @@ void udp_data_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip
 	int txlen = 0;
 	struct pbuf *txBuf;
 	int32_t header = 0;
+	uint8_t responseData[BUFFER_SIZE] = {0};
 
 	if (p == nullptr)
 	{
@@ -133,8 +134,27 @@ void udp_data_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip
 			return;
 		}
 
-		txData.header = PRU_DATA;
-		txlen = BUFFER_SIZE;
+		__disable_irq();
+
+		for (size_t i = 0;
+			 i < sizeof(responseData);
+			 i++)
+		{
+			responseData[i] =
+				txData.txBuffer[i];
+		}
+
+		__enable_irq();
+
+		const int32_t responseHeader =
+			PRU_DATA;
+
+		memcpy(
+			responseData,
+			&responseHeader,
+			sizeof(responseHeader));
+
+		txlen = sizeof(responseData);
 	}
 	else if (header == PRU_WRITE)
 	{
@@ -156,8 +176,15 @@ void udp_data_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip
 			return;
 		}
 
-		txData.header = PRU_ACKNOWLEDGE;
-		txlen = sizeof(txData.header);
+		const int32_t responseHeader =
+			PRU_ACKNOWLEDGE;
+
+		memcpy(
+			responseData,
+			&responseHeader,
+			sizeof(responseHeader));
+
+		txlen = sizeof(responseHeader);
 
 		// ensure an atomic access to the rxBuffer
 		// disable thread interrupts
@@ -190,7 +217,7 @@ void udp_data_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip
 	}
 
 	// copy the data into the buffer
-	if (pbuf_take(txBuf, (char*)&txData.txBuffer, txlen) != ERR_OK)
+	if (pbuf_take(txBuf, responseData, txlen) != ERR_OK)
 	{
 		pbuf_free(txBuf);
 		pbuf_free(p);
