@@ -1,7 +1,11 @@
 #include "RemoraComms.h"
 
 
-RemoraComms::RemoraComms()
+RemoraComms::RemoraComms() :
+	data(false),
+	status(false),
+	noDataCount(0),
+	CommsPin(nullptr)
 {
 	printf("Creating an Ethernet communication monitoring module\n");
 
