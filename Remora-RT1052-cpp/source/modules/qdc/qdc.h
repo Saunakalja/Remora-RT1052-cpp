@@ -17,8 +17,8 @@
 
 #include "extern.h"
 
-void muxPinsXBAR(const char*,xbar_output_signal_t);
-void createQdc(void);
+bool muxPinsXBAR(const char*,xbar_output_signal_t);
+bool createQdc(void);
 
 class portInterrupt; // forward declaration
 
@@ -44,7 +44,7 @@ class Qdc : public Module
         void indexEvent();
 
         int bitNumber;				// location in the data source
-        int mask;
+        uint32_t mask;
         int filt_per;
         int filt_cnt;
 

@@ -565,11 +565,13 @@ void loadModules(void)
             {
                 createEncoder();
             }
-        	else if (!strcmp(type,"QDC"))
-        	{
-        		createQdc();
-        		hasQDC = true;
-        	}
+            else if (!strcmp(type,"QDC"))
+            {
+                if (createQdc())
+                {
+                    hasQDC = true;
+                }
+            }
          }
         else if (!strcmp(thread,"Servo"))
         {

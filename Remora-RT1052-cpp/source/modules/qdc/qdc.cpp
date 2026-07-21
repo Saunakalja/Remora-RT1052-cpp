@@ -1,12 +1,21 @@
 
 #include "qdc.h"
 
+#include <cstring>
+
 volatile bool initXBARA = true;
 Module* qdc[MAX_INST_QDC_MOD] = {nullptr,nullptr,nullptr,nullptr};
 
-void muxPinsXBAR(const char* pin,xbar_output_signal_t kXBARA1_OutputEncInput)
+bool muxPinsXBAR(const char* pin,xbar_output_signal_t kXBARA1_OutputEncInput)
 {
   uint8_t mux_op_pin = 0;
+
+  if (pin == nullptr)
+  {
+	printf("********The Qdc phase pin is missing********\r\n");
+	printf("********The instance of the Qdc module could not be carried out********\r\n");
+	return false;
+  }
 
   if(!strcmp(pin,"P4_13"))
 	mux_op_pin = 1;
@@ -43,7 +52,7 @@ void muxPinsXBAR(const char* pin,xbar_output_signal_t kXBARA1_OutputEncInput)
   {
 	printf("********The %s pin cannot be multiplexed pad(pin)-/->XBAR-->Qdc********\r\n",pin);
 	printf("********The instance of the Qdc module could not be carried out********\r\n");
-	return;
+	return false;
   }
 
   switch(mux_op_pin)
@@ -109,14 +118,16 @@ void muxPinsXBAR(const char* pin,xbar_output_signal_t kXBARA1_OutputEncInput)
 		XBARA_SetSignalsConnection(XBARA1, kXBARA1_InputIomuxXbarIn21, kXBARA1_OutputEncInput);
 		break;
     default:
-    	break;
+        return false;
   }
+
+  return true;
 }
 
 /***********************************************************************
                 MODULE CONFIGURATION AND CREATION FROM JSON
 ************************************************************************/
-void createQdc()
+bool createQdc()
 {
     const char* comment = module["Comment"];
     printf("%s\n",comment);
@@ -130,82 +141,144 @@ void createQdc()
     int filt_per = module["Filter PER"];
     int filt_cnt = module["Filter CNT"];
 
-	char port[3] = {0};
-	char pinNumber[3] = {0};
-
     ENC_Type* encBase = nullptr;
+    xbar_output_signal_t phaseAInput = kXBARA1_OutputEnc1PhaseAInput;
+    xbar_output_signal_t phaseBInput = kXBARA1_OutputEnc1PhaseBInput;
     GPIO_Type* gpioBase = nullptr;
-    IRQn_Type IndexIrqGpioPinId;
-    uint8_t indexPortNumber;
-    uint8_t indexPinInNumber;
+    IRQn_Type IndexIrqGpioPinId = NotAvail_IRQn;
+    uint8_t indexPortNumber = 0U;
+    uint8_t indexPinInNumber = 0U;
 
-    if(initXBARA == true)
+    if ((pv < 0) ||
+        (pv >= VARIABLES))
     {
-    	XBARA_Init(XBARA1);
-    	initXBARA = false;
+        printf("QDC PV index %d is invalid\r\n", pv);
+        return false;
+    }
 
+    if ((encNumber < 1) ||
+        (encNumber > MAX_INST_QDC_MOD))
+    {
+        printf("QDC ENC No %d is invalid\r\n", encNumber);
+        return false;
+    }
+
+    if (qdc[encNumber - 1] != nullptr)
+    {
+        printf("QDC ENC No %d is already configured\r\n", encNumber);
+        return false;
+    }
+
+    if ((pinA == nullptr) ||
+        (pinB == nullptr))
+    {
+        printf("QDC phase pin configuration is missing\r\n");
+        return false;
     }
 
     switch(encNumber)
     {
       case(1):
-		muxPinsXBAR(pinA,kXBARA1_OutputEnc1PhaseAInput);
-		muxPinsXBAR(pinB,kXBARA1_OutputEnc1PhaseBInput);
+		phaseAInput = kXBARA1_OutputEnc1PhaseAInput;
+		phaseBInput = kXBARA1_OutputEnc1PhaseBInput;
 		encBase = ENC1;
-      	break;
+        break;
       case(2):
-		muxPinsXBAR(pinA,kXBARA1_OutputEnc2PhaseAInput);
-		muxPinsXBAR(pinB,kXBARA1_OutputEnc2PhaseBInput);
+		phaseAInput = kXBARA1_OutputEnc2PhaseAInput;
+		phaseBInput = kXBARA1_OutputEnc2PhaseBInput;
 		encBase = ENC2;
-      	break;
+        break;
       case(3):
-		muxPinsXBAR(pinA,kXBARA1_OutputEnc3PhaseAInput);
-		muxPinsXBAR(pinB,kXBARA1_OutputEnc3PhaseBInput);
+		phaseAInput = kXBARA1_OutputEnc3PhaseAInput;
+		phaseBInput = kXBARA1_OutputEnc3PhaseBInput;
 		encBase = ENC3;
-      	break;
+        break;
       case(4):
-		muxPinsXBAR(pinA,kXBARA1_OutputEnc4PhaseAInput);
-		muxPinsXBAR(pinB,kXBARA1_OutputEnc4PhaseBInput);
+		phaseAInput = kXBARA1_OutputEnc4PhaseAInput;
+		phaseBInput = kXBARA1_OutputEnc4PhaseBInput;
 		encBase = ENC4;
-      	break;
+        break;
       default:
-    	break;
+        break;
     }
 
     if (!(pinI == nullptr))
     {
-    	strncpy(port,pinI,2);
-    	strncpy(pinNumber,pinI+3,2);
-    	if(!strcmp(port,"P3"))
-    	{
-    		gpioBase = GPIO3;
-    		indexPortNumber = 3;
-    		indexPinInNumber = atoi(pinNumber);
-    		printf("Index GPIO Pin Number: GPIO3_%d\n",indexPinInNumber);
-    		if(indexPinInNumber < 16)
-    		{
-    			IndexIrqGpioPinId = GPIO3_Combined_0_15_IRQn;
-    		}
-    		else
-    		{
-    			IndexIrqGpioPinId = GPIO3_Combined_16_31_IRQn;
-    		}
-    	}
-    	else if(!strcmp(port,"P4"))
-    	{
-    		gpioBase = GPIO4;
-    		indexPortNumber = 4;
-    		indexPinInNumber = atoi(pinNumber);
-    		printf("Index GPIO Pin Number: GPIO4_%d\n",indexPinInNumber);
-    		if(indexPinInNumber < 16)
-    		{
-    			IndexIrqGpioPinId = GPIO4_Combined_0_15_IRQn;
-    		}
-    		else
-    		{
-    			IndexIrqGpioPinId = GPIO4_Combined_16_31_IRQn;
-    		}
-    	}
+        if ((dataBit < 0) ||
+            (dataBit >= 32))
+        {
+            printf("QDC index Data Bit %d is invalid\r\n", dataBit);
+            return false;
+        }
+
+        if ((strlen(pinI) != 5U) ||
+            (pinI[0] != 'P') ||
+            ((pinI[1] != '3') &&
+             (pinI[1] != '4')) ||
+            (pinI[2] != '_') ||
+            (pinI[3] < '0') ||
+            (pinI[3] > '9') ||
+            (pinI[4] < '0') ||
+            (pinI[4] > '9'))
+        {
+            printf(
+                "QDC index pin %s is invalid\r\n",
+                pinI);
+            return false;
+        }
+
+        indexPinInNumber =
+            (pinI[3] - '0') * 10U +
+            (pinI[4] - '0');
+
+        if (indexPinInNumber > 31U)
+        {
+            printf("QDC index pin %s is invalid\r\n", pinI);
+            return false;
+        }
+
+        if(pinI[1] == '3')
+        {
+            gpioBase = GPIO3;
+            indexPortNumber = 3;
+            printf("Index GPIO Pin Number: GPIO3_%d\n",indexPinInNumber);
+            if(indexPinInNumber < 16)
+            {
+                IndexIrqGpioPinId = GPIO3_Combined_0_15_IRQn;
+            }
+            else
+            {
+                IndexIrqGpioPinId = GPIO3_Combined_16_31_IRQn;
+            }
+        }
+        else
+        {
+            gpioBase = GPIO4;
+            indexPortNumber = 4;
+            printf("Index GPIO Pin Number: GPIO4_%d\n",indexPinInNumber);
+            if(indexPinInNumber < 16)
+            {
+                IndexIrqGpioPinId = GPIO4_Combined_0_15_IRQn;
+            }
+            else
+            {
+                IndexIrqGpioPinId = GPIO4_Combined_16_31_IRQn;
+            }
+        }
+    }
+
+    if(initXBARA == true)
+    {
+        XBARA_Init(XBARA1);
+        initXBARA = false;
+
+    }
+
+    if (!muxPinsXBAR(pinA, phaseAInput) ||
+        !muxPinsXBAR(pinB, phaseBInput))
+    {
+        printf("QDC creation failed during phase-pin multiplexing\r\n");
+        return false;
     }
 
 
@@ -214,8 +287,8 @@ void createQdc()
 
     if (pinI == nullptr)
     {
-    	printf("  Quadrature Encoder without index pin %s\n", pinI);
-    	qdc[encNumber-1] = new Qdc(*ptrProcessVariable[pv],encBase, filt_per, filt_cnt);
+        printf("  Quadrature Encoder without index pin %s\n", pinI);
+        qdc[encNumber-1] = new Qdc(*ptrProcessVariable[pv],encBase, filt_per, filt_cnt);
         baseThread->registerModule(qdc[encNumber-1]);
     }
     else
@@ -226,6 +299,7 @@ void createQdc()
         baseThread->registerModule(qdc[encNumber-1]);
     }
 
+    return true;
 }
 
 /***********************************************************************
@@ -281,7 +355,8 @@ Qdc::Qdc(volatile float &ptrEncoderCount, volatile uint32_t &ptrData, ENC_Type* 
     this->indexCount = 0;
     this->count = 0;								                // initialise the count to 0
     this->pulseCount = 0;                                           // number of base thread periods to pulse the index output
-    this->mask = 1 << this->bitNumber;
+    this->mask =
+        uint32_t{1} << this->bitNumber;
     this->indexDetected = false;
 }
 
