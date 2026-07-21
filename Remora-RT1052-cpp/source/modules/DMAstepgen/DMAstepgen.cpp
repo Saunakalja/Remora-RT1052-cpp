@@ -64,7 +64,7 @@ DMAstepgen::DMAstepgen(int32_t threadFreq, int jointNumber, std::string step, st
 	this->accumulator = 0;
 	this->remainder = 0;
 	this->stepLow = 0;
-	this->mask = 1 << this->jointNumber;
+	this->mask = uint32_t{1} << this->jointNumber;
 	this->isEnabled = false;
 	this->dir = false;
 
@@ -79,13 +79,13 @@ DMAstepgen::DMAstepgen(int32_t threadFreq, int jointNumber, std::string step, st
 	pin = this->step[3] - '0';
 	pin2 = this->step[4] - '0';
 	if (pin2 <= 9) pin = pin * 10 + pin2;
-	this->stepMask = 1 << pin;
+	this->stepMask = uint32_t{1} << pin;
 
 	// determine the dir pin number from the portAndPin string
 	pin = this->direction[3] - '0';
 	pin2 = this->direction[4] - '0';
 	if (pin2 <= 9) pin = pin * 10 + pin2;
-	this->dirMask = 1 << pin;
+	this->dirMask = uint32_t{1} << pin;
 }
 
 
