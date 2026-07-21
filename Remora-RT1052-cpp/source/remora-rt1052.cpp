@@ -43,6 +43,7 @@ along with this program; If not, see <http://www.gnu.org/licenses/>.
 #include "crc32.h"
 
 // libraries
+#include <cstring>
 #include <sys/errno.h>
 #include "lib/ArduinoJson6/ArduinoJson.h"
 
@@ -249,41 +250,63 @@ int8_t checkJson()
 
 void moveJson()
 {
-	uint8_t pages, sectors;
-    uint32_t i = 0;
-	metadata_t* meta = (metadata_t*)(XIP_BASE + JSON_UPLOAD_ADDRESS);
+	uint32_t pages;
+	uint32_t sectors;
+	uint32_t i = 0U;
+
+	metadata_t* meta =
+		reinterpret_cast<metadata_t*>(
+			XIP_BASE + JSON_UPLOAD_ADDRESS);
+
+	const uint32_t jsonLength =
+		meta->jsonLength;
+
 	uint32_t Flash_Write_Address;
 
-	uint16_t jsonLength = meta->jsonLength;
+	if ((jsonLength == 0U) ||
+		(jsonLength > JSON_BUFF_SIZE))
+	{
+		printf("JSON Config byte length incorrect\n");
+		return;
+	}
 
     // how many pages are needed to be written. The first 4 bytes of the storage location will contain the length of the JSON file
-    pages = (meta->jsonLength + 4) / FLASH_PAGE_SIZE;
-    if ((meta->jsonLength + 4) % FLASH_PAGE_SIZE > 0)
-    {
-        pages++;
-    }
+	const uint32_t storedLength =
+		sizeof(uint32_t) +
+		jsonLength;
 
-    sectors = pages / 16; // 16 pages per sector
-    if (pages % 16 > 0)
-    {
-    	sectors++;
-    }
+	pages =
+		(storedLength +
+		 FLASH_PAGE_SIZE -
+		 1U) /
+		FLASH_PAGE_SIZE;
 
-    printf("pages = %d, sectors = %d\n", pages, sectors);
+	const uint32_t programmedLength =
+		pages *
+		FLASH_PAGE_SIZE;
 
-    uint8_t data[pages * 256] = {0};
+	sectors =
+		(programmedLength +
+		 SECTOR_SIZE -
+		 1U) /
+		SECTOR_SIZE;
 
-	// store the length of the file in the 0th word
-    data[0] = (uint8_t)((jsonLength & 0x00FF));
-    data[1] = (uint8_t)((jsonLength & 0xFF00) >> 8);
+    printf(
+		"pages = %lu, sectors = %lu\n",
+		static_cast<unsigned long>(pages),
+		static_cast<unsigned long>(sectors));
 
     //The buffer argument points to the data to be written, which is of size size.
     //This size must be a multiple of the "page size", which is defined as the constant FLASH_PAGE_SIZE, with a value of 256 bytes.
 
-    for (i = 0; i < jsonLength; i++)
-    {
-        data[i + 4] = *((uint8_t*)(XIP_BASE + JSON_UPLOAD_ADDRESS + METADATA_LEN + i));
-    }
+	alignas(uint32_t)
+	uint8_t pageData[FLASH_PAGE_SIZE];
+
+	const uint8_t* uploadedJson =
+		reinterpret_cast<const uint8_t*>(
+			XIP_BASE +
+			JSON_UPLOAD_ADDRESS +
+			METADATA_LEN);
 
 	// erase the old JSON config file
 
@@ -311,7 +334,69 @@ void moveJson()
 
 	for (i = 0; i < pages; i++)
 	{
-		status_t status = flexspi_nor_flash_page_program(FLEXSPI, Flash_Write_Address + i * FLASH_PAGE_SIZE, (uint32_t *)(data + i * FLASH_PAGE_SIZE));
+		memset(pageData, 0, sizeof(pageData));
+
+		const uint32_t pageOffset =
+			i * FLASH_PAGE_SIZE;
+
+		const uint32_t destinationOffset =
+			(i == 0U) ?
+			sizeof(uint32_t) :
+			0U;
+
+		const uint32_t sourceOffset =
+			(i == 0U) ?
+			0U :
+			pageOffset - sizeof(uint32_t);
+
+		if (i == 0U)
+		{
+			pageData[0] =
+				static_cast<uint8_t>(
+					jsonLength);
+
+			pageData[1] =
+				static_cast<uint8_t>(
+					jsonLength >> 8);
+
+			pageData[2] =
+				static_cast<uint8_t>(
+					jsonLength >> 16);
+
+			pageData[3] =
+				static_cast<uint8_t>(
+					jsonLength >> 24);
+		}
+
+		if (sourceOffset < jsonLength)
+		{
+			const uint32_t remaining =
+				jsonLength -
+				sourceOffset;
+
+			const uint32_t capacity =
+				FLASH_PAGE_SIZE -
+				destinationOffset;
+
+			const uint32_t bytesToCopy =
+				(remaining < capacity) ?
+				remaining :
+				capacity;
+
+			memcpy(
+				pageData + destinationOffset,
+				uploadedJson + sourceOffset,
+				bytesToCopy);
+		}
+
+		status =
+			flexspi_nor_flash_page_program(
+				FLEXSPI,
+				Flash_Write_Address +
+					i * FLASH_PAGE_SIZE,
+				reinterpret_cast<uint32_t*>(
+					pageData));
+
 		if (status != kStatus_Success)
 		{
 		 PRINTF("Page program failure !\r\n");
