@@ -249,13 +249,36 @@ void udp_data_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip
 	}
 
 	// Connect to the remote client
-	udp_connect(upcb, addr, port);
+	const err_t connectStatus =
+		udp_connect(
+			upcb,
+			addr,
+			port);
+
+	if (connectStatus != ERR_OK)
+	{
+		PRINTF(
+			"Failed to connect control UDP reply PCB !\r\n");
+
+		pbuf_free(txBuf);
+		pbuf_free(p);
+		return;
+	}
 
 	// Send a Reply to the Client
-	udp_send(upcb, txBuf);
+	const err_t sendStatus =
+		udp_send(
+			upcb,
+			txBuf);
 
 	// free the UDP connection, so we can accept new clients
 	udp_disconnect(upcb);
+
+	if (sendStatus != ERR_OK)
+	{
+		PRINTF(
+			"Failed to send control UDP reply !\r\n");
+	}
 
 	// Free the p_tx buffer
 	pbuf_free(txBuf);
