@@ -1024,6 +1024,54 @@ void loadModules(void)
                 configError = true;
                 return;
             }
+
+            JsonVariantConst stepPinValue =
+                moduleObject["Step Pin"];
+
+            if (!stepPinValue.is<const char*>())
+            {
+                printf(
+                    "Stepgen module entry %lu step pin is missing or is not a string\n",
+                    static_cast<unsigned long>(moduleIndex));
+                configError = true;
+                return;
+            }
+
+            const char* stepPin =
+                stepPinValue.as<const char*>();
+
+            if (!isValidGpioPinName(stepPin))
+            {
+                printf(
+                    "Stepgen module entry %lu step pin is invalid\n",
+                    static_cast<unsigned long>(moduleIndex));
+                configError = true;
+                return;
+            }
+
+            JsonVariantConst directionPinValue =
+                moduleObject["Direction Pin"];
+
+            if (!directionPinValue.is<const char*>())
+            {
+                printf(
+                    "Stepgen module entry %lu direction pin is missing or is not a string\n",
+                    static_cast<unsigned long>(moduleIndex));
+                configError = true;
+                return;
+            }
+
+            const char* directionPin =
+                directionPinValue.as<const char*>();
+
+            if (!isValidGpioPinName(directionPin))
+            {
+                printf(
+                    "Stepgen module entry %lu direction pin is invalid\n",
+                    static_cast<unsigned long>(moduleIndex));
+                configError = true;
+                return;
+            }
         }
 
         moduleIndex++;
