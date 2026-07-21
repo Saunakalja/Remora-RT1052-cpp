@@ -80,7 +80,7 @@ DigitalPin::DigitalPin(volatile uint32_t &ptrData, int mode, std::string portAnd
 	modifier(modifier)
 {
 	this->pin = new Pin(this->portAndPin, this->mode);		// Input 0x0, Output 0x1
-	this->mask = 1 << this->bitNumber;
+	this->mask = uint32_t{1} << this->bitNumber;
 }
 
 

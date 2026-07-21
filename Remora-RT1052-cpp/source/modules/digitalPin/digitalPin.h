@@ -18,7 +18,7 @@ class DigitalPin : public Module
 		volatile uint32_t *ptrData; 	// pointer to the data source
 		int bitNumber;				// location in the data source
 		bool invert;
-		int mask;
+		uint32_t mask;
 
 		int mode;
         int modifier;
