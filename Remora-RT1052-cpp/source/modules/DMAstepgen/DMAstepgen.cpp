@@ -286,6 +286,23 @@ void DMAstepgen::makePulses()
 				this->dirChange = false;
 			}
 		}
+		else if (this->isStepping)
+		{
+			// Select the currently writable ping-pong buffer.
+			if (!*stepDMAactiveBuffer)
+			{
+				stepDMAbuffer = stepDMAbuffer_0;
+			}
+			else
+			{
+				stepDMAbuffer = stepDMAbuffer_1;
+			}
+
+			// Complete the STEP pulse carried over from the previous DMA period.
+			*(stepDMAbuffer + this->stepLow) |= this->stepMask;
+			this->stepLow = 0;
+			this->isStepping = false;
+		}
 	}
 	else
 	{
