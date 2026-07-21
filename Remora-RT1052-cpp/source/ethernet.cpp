@@ -158,6 +158,9 @@ void udp_data_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip
 			return;
 		}
 
+		const uint32_t readPrimask =
+			__get_PRIMASK();
+
 		__disable_irq();
 
 		for (size_t i = 0;
@@ -168,7 +171,8 @@ void udp_data_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip
 				txData.txBuffer[i];
 		}
 
-		__enable_irq();
+		__set_PRIMASK(
+			readPrimask);
 
 		const int32_t responseHeader =
 			PRU_DATA;
@@ -212,6 +216,9 @@ void udp_data_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip
 
 		// ensure an atomic access to the rxBuffer
 		// disable thread interrupts
+		const uint32_t writePrimask =
+			__get_PRIMASK();
+
 		__disable_irq();
 
 		// then move the data
@@ -220,8 +227,9 @@ void udp_data_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip
 		// Of course not a lot but every little bit is enough.
 		memcpy(&rxData.rxBuffer, incomingData, sizeof(incomingData));
 
-		// re-enable thread interrupts
-		__enable_irq();
+		// restore previous interrupt state
+		__set_PRIMASK(
+			writePrimask);
 
 		comms->dataReceived();
 	}
@@ -326,6 +334,9 @@ void udp_mpg_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip_
 		return;
 	}
 
+	const uint32_t mpgPrimask =
+		__get_PRIMASK();
+
 	__disable_irq();
 
 	memcpy(
@@ -336,5 +347,6 @@ void udp_mpg_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip_
 	// use a standard module interface to trigger the update of the MPG
 	MPG->configure();
 
-	__enable_irq();
+	__set_PRIMASK(
+		mpgPrimask);
 }
