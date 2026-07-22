@@ -833,6 +833,10 @@ void loadModules(void)
 
     uint32_t inputBitProducerEntry[32] = {};
 
+    const char* dmaStepgenPinRole[32] = {};
+
+    uint32_t dmaStepgenPinOwnerEntry[32] = {};
+
     bool qdcEncoderConfigured[MAX_INST_QDC_MOD] = {};
 
     uint32_t moduleIndex = 0U;
@@ -1095,6 +1099,68 @@ void loadModules(void)
                     return;
                 }
             }
+
+            uint32_t stepPinNumber =
+                static_cast<uint32_t>(
+                    stepPin[3] - '0');
+
+            if (stepPin[4] != '\0')
+            {
+                stepPinNumber =
+                    stepPinNumber * 10U +
+                    static_cast<uint32_t>(
+                        stepPin[4] - '0');
+            }
+
+            uint32_t directionPinNumber =
+                static_cast<uint32_t>(
+                    directionPin[3] - '0');
+
+            if (directionPin[4] != '\0')
+            {
+                directionPinNumber =
+                    directionPinNumber * 10U +
+                    static_cast<uint32_t>(
+                        directionPin[4] - '0');
+            }
+
+            if (dmaStepgenPinRole[stepPinNumber] != nullptr)
+            {
+                printf(
+                    "DMAstepgen module entry %lu Step Pin %s conflicts with %s from module entry %lu\n",
+                    static_cast<unsigned long>(moduleIndex),
+                    stepPin,
+                    dmaStepgenPinRole[stepPinNumber],
+                    static_cast<unsigned long>(
+                        dmaStepgenPinOwnerEntry[stepPinNumber]));
+                configError = true;
+                return;
+            }
+
+            if (dmaStepgenPinRole[directionPinNumber] != nullptr)
+            {
+                printf(
+                    "DMAstepgen module entry %lu Direction Pin %s conflicts with %s from module entry %lu\n",
+                    static_cast<unsigned long>(moduleIndex),
+                    directionPin,
+                    dmaStepgenPinRole[directionPinNumber],
+                    static_cast<unsigned long>(
+                        dmaStepgenPinOwnerEntry[directionPinNumber]));
+                configError = true;
+                return;
+            }
+
+            dmaStepgenPinRole[stepPinNumber] =
+                "Step Pin";
+
+            dmaStepgenPinOwnerEntry[stepPinNumber] =
+                moduleIndex;
+
+            dmaStepgenPinRole[directionPinNumber] =
+                "Direction Pin";
+
+            dmaStepgenPinOwnerEntry[directionPinNumber] =
+                moduleIndex;
 
             jointConfigured[jointNumber] =
                 true;
