@@ -60,6 +60,9 @@ static void IAP_tftp_abort_transfer(
     tftp_connection_args *args,
     struct pbuf *pkt_buf);
 static tftp_opcode IAP_tftp_decode_op(char *buf);
+static bool IAP_tftp_validate_wrq_payload(
+    const char *payload,
+    u16_t packetLength);
 static u16_t IAP_tftp_extract_block(const char *buf);
 static void IAP_tftp_set_opcode(char *buffer, tftp_opcode opcode);
 static void IAP_tftp_set_block(char* packet, u16_t block);
@@ -76,6 +79,135 @@ static err_t IAP_tftp_send_ack_packet(struct udp_pcb *upcb, const ip_addr_t *to,
 static tftp_opcode IAP_tftp_decode_op(char *buf)
 {
   return (tftp_opcode)(buf[1]);
+}
+
+
+static bool IAP_tftp_validate_wrq_payload(
+    const char *payload,
+    u16_t packetLength)
+{
+  if ((payload == nullptr) ||
+      (packetLength < TFTP_OPCODE_LEN))
+  {
+    return false;
+  }
+
+  const uint8_t *bytes =
+      reinterpret_cast<const uint8_t *>(
+          payload);
+
+  if ((bytes[0] != 0x00U) ||
+      (bytes[1] != static_cast<uint8_t>(
+                       TFTP_WRQ)))
+  {
+    return false;
+  }
+
+  u16_t index =
+      TFTP_OPCODE_LEN;
+
+  if ((index >= packetLength) ||
+      (bytes[index] == 0x00U))
+  {
+    return false;
+  }
+
+  while ((index < packetLength) &&
+         (bytes[index] != 0x00U))
+  {
+    index++;
+  }
+
+  if (index >= packetLength)
+  {
+    return false;
+  }
+
+  index++;
+
+  const char expectedMode[] =
+      {'o', 'c', 't', 'e', 't'};
+
+  for (u16_t modeIndex = 0;
+       modeIndex < sizeof(expectedMode);
+       modeIndex++)
+  {
+    if (index >= packetLength)
+    {
+      return false;
+    }
+
+    uint8_t modeByte =
+        bytes[index];
+
+    if ((modeByte >= static_cast<uint8_t>('A')) &&
+        (modeByte <= static_cast<uint8_t>('Z')))
+    {
+      modeByte =
+          static_cast<uint8_t>(
+              modeByte +
+              (static_cast<uint8_t>('a') -
+               static_cast<uint8_t>('A')));
+    }
+
+    if (modeByte != static_cast<uint8_t>(
+                        expectedMode[modeIndex]))
+    {
+      return false;
+    }
+
+    index++;
+  }
+
+  if ((index >= packetLength) ||
+      (bytes[index] != 0x00U))
+  {
+    return false;
+  }
+
+  index++;
+
+  while (index < packetLength)
+  {
+    if (bytes[index] == 0x00U)
+    {
+      return false;
+    }
+
+    while ((index < packetLength) &&
+           (bytes[index] != 0x00U))
+    {
+      index++;
+    }
+
+    if (index >= packetLength)
+    {
+      return false;
+    }
+
+    index++;
+
+    if ((index >= packetLength) ||
+        (bytes[index] == 0x00U))
+    {
+      return false;
+    }
+
+    while ((index < packetLength) &&
+           (bytes[index] != 0x00U))
+    {
+      index++;
+    }
+
+    if (index >= packetLength)
+    {
+      return false;
+    }
+
+    index++;
+  }
+
+  return true;
 }
 
 /**
@@ -677,7 +809,6 @@ static int IAP_tftp_process_write(struct udp_pcb *upcb, const ip_addr_t *to, int
 static void IAP_tftp_recv_callback(void *arg, struct udp_pcb *upcb, struct pbuf *pkt_buf,
                         const ip_addr_t *addr, u16_t port)
 {
-  tftp_opcode op;
   struct udp_pcb *upcb_tftp_data;
   err_t err;
 
@@ -686,17 +817,19 @@ static void IAP_tftp_recv_callback(void *arg, struct udp_pcb *upcb, struct pbuf 
     return;
   }
 
-  if ((pkt_buf->len != pkt_buf->tot_len) ||
+  if ((addr == nullptr) ||
+      (pkt_buf->payload == nullptr) ||
+      (pkt_buf->len != pkt_buf->tot_len) ||
       (pkt_buf->len < TFTP_OPCODE_LEN))
   {
     pbuf_free(pkt_buf);
     return;
   }
 
-  op = IAP_tftp_decode_op(
-      static_cast<char *>(pkt_buf->payload));
-
-  if (op != TFTP_WRQ)
+  if (!IAP_tftp_validate_wrq_payload(
+          static_cast<const char *>(
+              pkt_buf->payload),
+          pkt_buf->len))
   {
     pbuf_free(pkt_buf);
     return;
