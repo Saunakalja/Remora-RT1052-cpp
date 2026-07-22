@@ -6,53 +6,88 @@
 volatile bool initXBARA = true;
 Module* qdc[MAX_INST_QDC_MOD] = {nullptr,nullptr,nullptr,nullptr};
 
-bool muxPinsXBAR(const char* pin,xbar_output_signal_t kXBARA1_OutputEncInput)
+static bool resolveQdcPhaseMuxPin(
+    const char* pin,
+    uint8_t* mux_op_pin)
 {
-  uint8_t mux_op_pin = 0;
-
-  if (pin == nullptr)
+  if ((pin == nullptr) ||
+      (mux_op_pin == nullptr))
   {
-	printf("********The Qdc phase pin is missing********\r\n");
-	printf("********The instance of the Qdc module could not be carried out********\r\n");
-	return false;
+    return false;
   }
 
   if(!strcmp(pin,"P4_13"))
-	mux_op_pin = 1;
+    *mux_op_pin = 1U;
   else if(!strcmp(pin,"P4_14"))
-	mux_op_pin = 2;
+    *mux_op_pin = 2U;
   else if(!strcmp(pin,"P3_21"))
-    mux_op_pin = 3;
-  else if(!strcmp(pin,"P4_00") && !strcmp(board,"EC500"))
-    mux_op_pin = 4;
+    *mux_op_pin = 3U;
+  else if(!strcmp(pin,"P4_00") &&
+          (board != nullptr) &&
+          !strcmp(board,"EC500"))
+    *mux_op_pin = 4U;
   else if(!strcmp(pin,"P3_23"))
-    mux_op_pin = 5;
+    *mux_op_pin = 5U;
   else if(!strcmp(pin,"P4_15"))
-    mux_op_pin = 6;
+    *mux_op_pin = 6U;
   else if(!strcmp(pin,"P3_16"))
+    *mux_op_pin = 7U;
+  else if(!strcmp(pin,"P3_17"))
+    *mux_op_pin = 8U;
+  else if(!strcmp(pin,"P3_22"))
+    *mux_op_pin = 9U;
+  else if(!strcmp(pin,"P4_16") &&
+          (board != nullptr) &&
+          !strcmp(board,"EC300"))
+    *mux_op_pin = 10U;
+  else
+    return false;
+
+  return true;
+}
+
+static bool isQdcPhasePinSupported(
+    const char* pin)
+{
+  uint8_t mux_op_pin = 0U;
+
+  return resolveQdcPhaseMuxPin(
+      pin,
+      &mux_op_pin);
+}
+
+bool muxPinsXBAR(const char* pin,xbar_output_signal_t kXBARA1_OutputEncInput)
+{
+  uint8_t mux_op_pin = 0U;
+
+  if (!resolveQdcPhaseMuxPin(
+          pin,
+          &mux_op_pin))
   {
-	mux_op_pin = 7;
+    if (pin == nullptr)
+    {
+      printf("********The Qdc phase pin is missing********\r\n");
+    }
+    else
+    {
+      printf("********The %s pin cannot be multiplexed pad(pin)-/->XBAR-->Qdc********\r\n",pin);
+    }
+
+    printf("********The instance of the Qdc module could not be carried out********\r\n");
+    return false;
+  }
+
+  if (mux_op_pin == 7U)
+  {
 	printf("P3_16 is only 5V tolerant, danger!!!!!!\r\n");
   }
-  else if(!strcmp(pin,"P3_17"))
+  else if (mux_op_pin == 8U)
   {
-	mux_op_pin = 8;
 	printf("P3_17 is only 5V tolerant, danger!!!!!!\r\n");
   }
-  else if(!strcmp(pin,"P3_22"))
+  else if (mux_op_pin == 9U)
   {
-	mux_op_pin = 9;
 	printf("P3_22 is only 5V tolerant, danger!!!!!!\r\n");
-  }
-  else if(!strcmp(pin,"P4_16") && !strcmp(board,"EC300"))
-  {
-	mux_op_pin = 10;
-  }
-  else
-  {
-	printf("********The %s pin cannot be multiplexed pad(pin)-/->XBAR-->Qdc********\r\n",pin);
-	printf("********The instance of the Qdc module could not be carried out********\r\n");
-	return false;
   }
 
   switch(mux_op_pin)
@@ -129,18 +164,12 @@ bool muxPinsXBAR(const char* pin,xbar_output_signal_t kXBARA1_OutputEncInput)
 ************************************************************************/
 bool createQdc()
 {
-    const char* comment = module["Comment"];
-    printf("%s\n",comment);
-
-    int pv = module["PV[i]"];
-    const char* pinA = module["ChA Pin"];
-    const char* pinB = module["ChB Pin"];
-    const char* pinI = module["Index Pin"];
-    int dataBit = module["Data Bit"];
-    int encNumber = module["ENC No"];
-    int filt_per = module["Filter PER"];
-    int filt_cnt = module["Filter CNT"];
-
+    const uint32_t filterPeriodMax = 255U;
+    const uint32_t filterCountMax = 7U;
+    const char* comment = nullptr;
+    const char* pinA = nullptr;
+    const char* pinB = nullptr;
+    const char* pinI = nullptr;
     ENC_Type* encBase = nullptr;
     xbar_output_signal_t phaseAInput = kXBARA1_OutputEnc1PhaseAInput;
     xbar_output_signal_t phaseBInput = kXBARA1_OutputEnc1PhaseBInput;
@@ -148,33 +177,172 @@ bool createQdc()
     IRQn_Type IndexIrqGpioPinId = NotAvail_IRQn;
     uint8_t indexPortNumber = 0U;
     uint8_t indexPinInNumber = 0U;
+    uint32_t dataBit = 0U;
 
-    if ((pv < 0) ||
-        (pv >= VARIABLES))
+    JsonVariantConst commentValue =
+        module["Comment"];
+
+    if (commentValue.is<const char*>())
     {
-        printf("QDC PV index %d is invalid\r\n", pv);
+        comment =
+            commentValue.as<const char*>();
+    }
+
+    JsonVariantConst pvValue =
+        module["PV[i]"];
+
+    if (!pvValue.is<uint32_t>())
+    {
+        printf("QDC PV index is missing or is not an unsigned integer\r\n");
         return false;
     }
 
-    if ((encNumber < 1) ||
+    const uint32_t pv =
+        pvValue.as<uint32_t>();
+
+    if (pv >= VARIABLES)
+    {
+        printf(
+            "QDC PV index %lu is invalid\r\n",
+            static_cast<unsigned long>(
+                pv));
+        return false;
+    }
+
+    JsonVariantConst encNumberValue =
+        module["ENC No"];
+
+    if (!encNumberValue.is<uint32_t>())
+    {
+        printf("QDC ENC No is missing or is not an unsigned integer\r\n");
+        return false;
+    }
+
+    const uint32_t encNumber =
+        encNumberValue.as<uint32_t>();
+
+    if ((encNumber < 1U) ||
         (encNumber > MAX_INST_QDC_MOD))
     {
-        printf("QDC ENC No %d is invalid\r\n", encNumber);
+        printf(
+            "QDC ENC No %lu is invalid\r\n",
+            static_cast<unsigned long>(
+                encNumber));
         return false;
     }
 
-    if (qdc[encNumber - 1] != nullptr)
+    if (qdc[encNumber - 1U] != nullptr)
     {
-        printf("QDC ENC No %d is already configured\r\n", encNumber);
+        printf(
+            "QDC ENC No %lu is already configured\r\n",
+            static_cast<unsigned long>(
+                encNumber));
         return false;
     }
+
+    JsonVariantConst pinAValue =
+        module["ChA Pin"];
+
+    if (!pinAValue.is<const char*>())
+    {
+        printf("QDC channel A pin is missing or is not a string\r\n");
+        return false;
+    }
+
+    pinA =
+        pinAValue.as<const char*>();
 
     if ((pinA == nullptr) ||
-        (pinB == nullptr))
+        (pinA[0] == '\0'))
     {
-        printf("QDC phase pin configuration is missing\r\n");
+        printf("QDC channel A pin is empty\r\n");
         return false;
     }
+
+    if (!isQdcPhasePinSupported(pinA))
+    {
+        printf(
+            "QDC channel A pin %s cannot be multiplexed to QDC\r\n",
+            pinA);
+        return false;
+    }
+
+    JsonVariantConst pinBValue =
+        module["ChB Pin"];
+
+    if (!pinBValue.is<const char*>())
+    {
+        printf("QDC channel B pin is missing or is not a string\r\n");
+        return false;
+    }
+
+    pinB =
+        pinBValue.as<const char*>();
+
+    if ((pinB == nullptr) ||
+        (pinB[0] == '\0'))
+    {
+        printf("QDC channel B pin is empty\r\n");
+        return false;
+    }
+
+    if (!isQdcPhasePinSupported(pinB))
+    {
+        printf(
+            "QDC channel B pin %s cannot be multiplexed to QDC\r\n",
+            pinB);
+        return false;
+    }
+
+    JsonVariantConst filterPeriodValue =
+        module["Filter PER"];
+
+    if (!filterPeriodValue.is<uint32_t>())
+    {
+        printf("QDC Filter PER is missing or is not an unsigned integer\r\n");
+        return false;
+    }
+
+    const uint32_t filterPeriod =
+        filterPeriodValue.as<uint32_t>();
+
+    if (filterPeriod > filterPeriodMax)
+    {
+        printf(
+            "QDC Filter PER %lu is invalid\r\n",
+            static_cast<unsigned long>(
+                filterPeriod));
+        return false;
+    }
+
+    JsonVariantConst filterCountValue =
+        module["Filter CNT"];
+
+    if (!filterCountValue.is<uint32_t>())
+    {
+        printf("QDC Filter CNT is missing or is not an unsigned integer\r\n");
+        return false;
+    }
+
+    const uint32_t filterCount =
+        filterCountValue.as<uint32_t>();
+
+    if (filterCount > filterCountMax)
+    {
+        printf(
+            "QDC Filter CNT %lu is invalid\r\n",
+            static_cast<unsigned long>(
+                filterCount));
+        return false;
+    }
+
+    const int filt_per =
+        static_cast<int>(
+            filterPeriod);
+
+    const int filt_cnt =
+        static_cast<int>(
+            filterCount);
 
     switch(encNumber)
     {
@@ -202,12 +370,24 @@ bool createQdc()
         break;
     }
 
-    if (!(pinI == nullptr))
+    JsonVariantConst pinIValue =
+        module["Index Pin"];
+
+    if (!pinIValue.isNull())
     {
-        if ((dataBit < 0) ||
-            (dataBit >= 32))
+        if (!pinIValue.is<const char*>())
         {
-            printf("QDC index Data Bit %d is invalid\r\n", dataBit);
+            printf("QDC index pin is not a string\r\n");
+            return false;
+        }
+
+        pinI =
+            pinIValue.as<const char*>();
+
+        if ((pinI == nullptr) ||
+            (pinI[0] == '\0'))
+        {
+            printf("QDC index pin is empty\r\n");
             return false;
         }
 
@@ -227,6 +407,27 @@ bool createQdc()
             return false;
         }
 
+        JsonVariantConst dataBitValue =
+            module["Data Bit"];
+
+        if (!dataBitValue.is<uint32_t>())
+        {
+            printf("QDC index Data Bit is missing or is not an unsigned integer\r\n");
+            return false;
+        }
+
+        dataBit =
+            dataBitValue.as<uint32_t>();
+
+        if (dataBit >= 32U)
+        {
+            printf(
+                "QDC index Data Bit %lu is invalid\r\n",
+                static_cast<unsigned long>(
+                    dataBit));
+            return false;
+        }
+
         indexPinInNumber =
             (pinI[3] - '0') * 10U +
             (pinI[4] - '0');
@@ -241,7 +442,6 @@ bool createQdc()
         {
             gpioBase = GPIO3;
             indexPortNumber = 3;
-            printf("Index GPIO Pin Number: GPIO3_%d\n",indexPinInNumber);
             if(indexPinInNumber < 16)
             {
                 IndexIrqGpioPinId = GPIO3_Combined_0_15_IRQn;
@@ -255,7 +455,6 @@ bool createQdc()
         {
             gpioBase = GPIO4;
             indexPortNumber = 4;
-            printf("Index GPIO Pin Number: GPIO4_%d\n",indexPinInNumber);
             if(indexPinInNumber < 16)
             {
                 IndexIrqGpioPinId = GPIO4_Combined_0_15_IRQn;
@@ -265,6 +464,20 @@ bool createQdc()
                 IndexIrqGpioPinId = GPIO4_Combined_16_31_IRQn;
             }
         }
+    }
+
+    if ((comment != nullptr) &&
+        (comment[0] != '\0'))
+    {
+        printf("%s\n",comment);
+    }
+
+    if (pinI != nullptr)
+    {
+        printf(
+            "Index GPIO Pin Number: GPIO%d_%d\n",
+            indexPortNumber,
+            indexPinInNumber);
     }
 
     if(initXBARA == true)
@@ -282,22 +495,42 @@ bool createQdc()
     }
 
 
-    ptrProcessVariable[pv]  = &txData.processVariable[pv];
-    ptrInputs = &txData.inputs;
+    Module* qdcModule = nullptr;
 
     if (pinI == nullptr)
     {
-        printf("  Quadrature Encoder without index pin %s\n", pinI);
-        qdc[encNumber-1] = new Qdc(*ptrProcessVariable[pv],encBase, filt_per, filt_cnt);
-        baseThread->registerModule(qdc[encNumber-1]);
+        printf("  Quadrature Encoder without index pin\n");
+        qdcModule =
+            new Qdc(
+                txData.processVariable[pv],
+                encBase,
+                filt_per,
+                filt_cnt);
     }
     else
     {
         printf("  Quadrature Encoder has index at pin %s\n", pinI);
-        qdc[encNumber-1] = new Qdc(*ptrProcessVariable[pv], *ptrInputs, encBase, gpioBase, IndexIrqGpioPinId, indexPortNumber, indexPinInNumber, dataBit, filt_per, filt_cnt);
+        qdcModule =
+            new Qdc(
+                txData.processVariable[pv],
+                txData.inputs,
+                encBase,
+                gpioBase,
+                IndexIrqGpioPinId,
+                indexPortNumber,
+                indexPinInNumber,
+                static_cast<int>(
+                    dataBit),
+                filt_per,
+                filt_cnt);
         NVIC_SetPriority(IndexIrqGpioPinId , 4);
-        baseThread->registerModule(qdc[encNumber-1]);
     }
+
+    ptrProcessVariable[pv]  = &txData.processVariable[pv];
+    ptrInputs = &txData.inputs;
+    qdc[encNumber - 1U] =
+        qdcModule;
+    baseThread->registerModule(qdcModule);
 
     return true;
 }
