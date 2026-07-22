@@ -13,8 +13,8 @@ class RemoraComms : public Module
 {
   private:
 
-	bool		data;
-	bool		status;
+	volatile bool	data;
+	volatile bool	status;
 
 	uint8_t		noDataCount;
 

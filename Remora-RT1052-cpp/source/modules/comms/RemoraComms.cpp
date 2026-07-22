@@ -43,12 +43,31 @@ void RemoraComms::update()
 
 void RemoraComms::dataReceived()
 {
+	const uint32_t primask =
+		__get_PRIMASK();
+
+	__disable_irq();
+
 	this->data= true;
+
+	__set_PRIMASK(
+		primask);
 }
 
 
 bool RemoraComms::getStatus()
 {
-	return this->status;
+	const uint32_t primask =
+		__get_PRIMASK();
+
+	__disable_irq();
+
+	const bool currentStatus =
+		this->status;
+
+	__set_PRIMASK(
+		primask);
+
+	return currentStatus;
 }
 
