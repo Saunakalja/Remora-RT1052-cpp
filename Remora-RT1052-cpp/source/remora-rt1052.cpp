@@ -45,7 +45,7 @@ along with this program; If not, see <http://www.gnu.org/licenses/>.
 // libraries
 #include <cstring>
 #include <sys/errno.h>
-#include "lib/ArduinoJson6/ArduinoJson.h"
+#include "lib/ArduinoJson6/ArduinoJson-v6.21.6.h"
 
 // drivers
 #include "drivers/pin/pin.h"
@@ -634,7 +634,7 @@ void configThreads()
     JsonVariantConst threadsValue =
         doc["Threads"];
 
-    if (!threadsValue.is<JsonArray>())
+    if (!threadsValue.is<JsonArrayConst>())
     {
         printf("Threads configuration is not an array\n");
         configError = true;
@@ -671,7 +671,7 @@ void configThreads()
         JsonVariantConst threadValue =
             *it;
 
-        if (!threadValue.is<JsonObject>())
+        if (!threadValue.is<JsonObjectConst>())
         {
             printf(
                 "Thread entry %lu is not an object\n",
@@ -809,7 +809,7 @@ void loadModules(void)
     JsonVariantConst modulesValue =
         doc["Modules"];
 
-    if (!modulesValue.is<JsonArray>())
+    if (!modulesValue.is<JsonArrayConst>())
     {
         printf("Modules configuration is not an array\n");
         configError = true;
@@ -845,7 +845,7 @@ void loadModules(void)
         JsonVariantConst moduleValue =
             *it;
 
-        if (!moduleValue.is<JsonObject>())
+        if (!moduleValue.is<JsonObjectConst>())
         {
             printf(
                 "Module entry %lu is not an object\n",

@@ -6,7 +6,7 @@
 
 #include "fsl_edma.h"
 
-#include "../source/lib/ArduinoJson6/ArduinoJson.h"
+#include "lib/ArduinoJson6/ArduinoJson-v6.21.6.h"
 #include "../source/thread/pruThread.h"
 #include "../source/modules/qdc/qdc.h"
 
