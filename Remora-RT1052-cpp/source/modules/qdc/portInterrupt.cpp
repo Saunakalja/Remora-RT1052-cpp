@@ -21,7 +21,7 @@ portInterrupt::portInterrupt(Qdc* owner):InterruptOwnerPtr(owner)
 	EnableIRQ(this->InterruptOwnerPtr->irq);
 
 	GPIO_PinInit(this->InterruptOwnerPtr->gpioBase, this->InterruptOwnerPtr->indexPinInNumber, &pin_config);
-    GPIO_PortEnableInterrupts(this->InterruptOwnerPtr->gpioBase, 1U << this->InterruptOwnerPtr->indexPinInNumber);
+    GPIO_PortEnableInterrupts(this->InterruptOwnerPtr->gpioBase, uint32_t{1} << this->InterruptOwnerPtr->indexPinInNumber);
 }
 
 void portInterrupt::Register(IRQn_Type irq,portInterrupt* intThisPtr)
@@ -45,10 +45,10 @@ void portInterrupt::GPIO34_Combined_Wrapper(IRQn_Type combinedIrq)
 	{
 		if(IndexPinISRVectorTable[combinedIrq & 0x03][i])
 		{
-			if(GPIO_PortGetInterruptFlags(IndexPinISRVectorTable[combinedIrq & 0x03][i]->InterruptOwnerPtr->gpioBase) & 1 << IndexPinISRVectorTable[combinedIrq & 0x03][i]->InterruptOwnerPtr->indexPinInNumber)
+			if(GPIO_PortGetInterruptFlags(IndexPinISRVectorTable[combinedIrq & 0x03][i]->InterruptOwnerPtr->gpioBase) & uint32_t{1} << IndexPinISRVectorTable[combinedIrq & 0x03][i]->InterruptOwnerPtr->indexPinInNumber)
 			{
 				IndexPinISRVectorTable[combinedIrq & 0x03][i]->ISR_Handler();
-				GPIO_PortClearInterruptFlags(IndexPinISRVectorTable[combinedIrq & 0x03][i]->InterruptOwnerPtr->gpioBase, 1U << IndexPinISRVectorTable[combinedIrq & 0x03][i]->InterruptOwnerPtr->indexPinInNumber);
+				GPIO_PortClearInterruptFlags(IndexPinISRVectorTable[combinedIrq & 0x03][i]->InterruptOwnerPtr->gpioBase, uint32_t{1} << IndexPinISRVectorTable[combinedIrq & 0x03][i]->InterruptOwnerPtr->indexPinInNumber);
 			}
 		}
 		else
