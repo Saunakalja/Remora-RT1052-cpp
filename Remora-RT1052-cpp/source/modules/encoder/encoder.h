@@ -31,7 +31,7 @@ class Encoder : public Module
 
         uint8_t state;
         bool indexState;
-        int32_t count;
+        uint32_t count;
         int32_t indexCount;
         uint32_t indexPulse;
         uint32_t pulseCount;

@@ -1,5 +1,35 @@
 #include "encoder.h"
 
+#include <limits>
+
+static int32_t encoderCountToInt32(
+    uint32_t count)
+{
+    const uint32_t signedMaximum =
+        static_cast<uint32_t>(
+            std::numeric_limits<int32_t>::max());
+
+    if (count <= signedMaximum)
+    {
+        return static_cast<int32_t>(
+            count);
+    }
+
+    const uint32_t signBit =
+        signedMaximum + 1U;
+
+    if (count == signBit)
+    {
+        return std::numeric_limits<int32_t>::min();
+    }
+
+    const uint32_t magnitude =
+        (~count) + 1U;
+
+    return -static_cast<int32_t>(
+        magnitude);
+}
+
 /***********************************************************************
                 MODULE CONFIGURATION AND CREATION FROM JSON     
 ************************************************************************/
@@ -199,7 +229,7 @@ Encoder::Encoder(volatile float &ptrEncoderCount, std::string ChA, std::string C
 	ptrEncoderCount(&ptrEncoderCount),
 	state(0),
 	indexState(false),
-	count(0),
+	count(0U),
 	indexCount(0),
 	indexPulse(0),
 	pulseCount(0),
@@ -233,7 +263,7 @@ Encoder::Encoder(volatile float &ptrEncoderCount, volatile uint32_t &ptrData, in
 	ptrEncoderCount(&ptrEncoderCount),
 	state(0),
 	indexState(false),
-	count(0),
+	count(0U),
 	indexCount(0),
 	indexPulse(0),
 	pulseCount(0),
@@ -272,13 +302,13 @@ void Encoder::update()
 		case 0: case 5: case 10: case 15:
 			break;
 		case 1: case 7: case 8: case 14:
-			count++; break;
+			this->count += 1U; break;
 		case 2: case 4: case 11: case 13:
-			count--; break;
+			this->count -= 1U; break;
 		case 3: case 12:
-			count += 2; break;
+			this->count += 2U; break;
 		default:
-			count -= 2; break;
+			this->count -= 2U; break;
 	}
 
 	this->state = (s >> 2);
@@ -298,7 +328,9 @@ void Encoder::update()
         // handle index, index pulse and pulse count
         if (indexRising && (this->pulseCount == 0U))         // rising edge on index pulse
         {
-            this->indexCount = this->count;                 //  capture the encoder count at the index, send this to linuxCNC for one servo period 
+            this->indexCount =
+                encoderCountToInt32(
+                    this->count);                           //  capture the encoder count at the index, send this to linuxCNC for one servo period
             *(this->ptrEncoderCount) = this->indexCount;
             this->pulseCount = this->indexPulse;        
             *(this->ptrData) |= this->mask;                 // set bit in data source high
@@ -310,12 +342,16 @@ void Encoder::update()
         else
         {
             *(this->ptrData) &= ~this->mask;                // set bit in data source low
-            *(this->ptrEncoderCount) = this->count;         // update encoder count
+            *(this->ptrEncoderCount) =
+                encoderCountToInt32(
+                    this->count);                           // update encoder count
         }
     }
     else
     {
-        *(this->ptrEncoderCount) = this->count;             // update encoder count
+        *(this->ptrEncoderCount) =
+            encoderCountToInt32(
+                this->count);                               // update encoder count
     }
 }
 
