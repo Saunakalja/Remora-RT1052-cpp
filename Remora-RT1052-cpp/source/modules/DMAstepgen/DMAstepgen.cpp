@@ -1,5 +1,7 @@
 #include "DMAstepgen.h"
 
+#include <limits>
+
 
 
 /***********************************************************************
@@ -42,6 +44,30 @@ void createDMAstepgen()
                 METHOD DEFINITIONS
 ************************************************************************/
 
+static int32_t incrementRawCount(
+	int32_t rawCount)
+{
+	if (rawCount == std::numeric_limits<int32_t>::max())
+	{
+		return std::numeric_limits<int32_t>::min();
+	}
+
+	return rawCount + 1;
+}
+
+
+static int32_t decrementRawCount(
+	int32_t rawCount)
+{
+	if (rawCount == std::numeric_limits<int32_t>::min())
+	{
+		return std::numeric_limits<int32_t>::max();
+	}
+
+	return rawCount - 1;
+}
+
+
 DMAstepgen::DMAstepgen(int32_t threadFreq, int jointNumber, std::string step, std::string direction, int DMAbufferSize, int stepBit, volatile int32_t &ptrFrequencyCommand, volatile int32_t &ptrFeedback, volatile uint8_t &ptrJointEnable, uint8_t stepLength, uint8_t stepSpace, uint8_t dirHold, uint8_t dirSetup) :
 	mask(0),
 	jointNumber(jointNumber),
@@ -73,7 +99,6 @@ DMAstepgen::DMAstepgen(int32_t threadFreq, int jointNumber, std::string step, st
 	dirChange(false),
 	frequencyCommand(0),
 	rawCount(0),
-	DDSaccumulator(0),
 	accumulator(0),
 	addValue(0),
 	minAddValue(0),
@@ -310,9 +335,6 @@ void DMAstepgen::makePulses()
 				this->prevRemainder = this->remainder;
 				this->dirChange = false;
 
-				// update DDS accumulator (for compatibility with software stepgen)
-				this->DDSaccumulator = this->rawCount << this->stepBit;
-				//*(this->ptrFeedback) = this->DDSaccumulator;                     // Update position feedback via pointer to the data receiver
 				*(this->ptrFeedback) = this->rawCount;                     // Update position feedback via pointer to the data receiver
 			}
 			else
@@ -373,11 +395,15 @@ void DMAstepgen::makeStep()
 	// update the raw step count
 	if (this->dir)
 	{
-		this->rawCount++;
+		this->rawCount =
+			incrementRawCount(
+				this->rawCount);
 	}
 	else
 	{
-		this->rawCount--;
+		this->rawCount =
+			decrementRawCount(
+				this->rawCount);
 	}
 
 	// put step low into DMA buffer
