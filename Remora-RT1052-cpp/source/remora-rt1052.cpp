@@ -829,6 +829,10 @@ void loadModules(void)
 
     const char* processVariableProducer[VARIABLES] = {};
 
+    const char* inputBitProducer[32] = {};
+
+    uint32_t inputBitProducerEntry[32] = {};
+
     bool qdcEncoderConfigured[MAX_INST_QDC_MOD] = {};
 
     uint32_t moduleIndex = 0U;
@@ -1264,6 +1268,9 @@ void loadModules(void)
                 return;
             }
 
+            bool producesInputBit = false;
+            uint32_t inputDataBit = 0U;
+
             if (moduleObject.containsKey("Index Pin"))
             {
                 JsonVariantConst indexPinValue =
@@ -1324,18 +1331,20 @@ void loadModules(void)
                     return;
                 }
 
-                const uint32_t dataBit =
+                inputDataBit =
                     dataBitValue.as<uint32_t>();
 
-                if (dataBit >= 32U)
+                if (inputDataBit >= 32U)
                 {
                     printf(
                         "Encoder module entry %lu data bit %lu is out of range\n",
                         static_cast<unsigned long>(moduleIndex),
-                        static_cast<unsigned long>(dataBit));
+                        static_cast<unsigned long>(inputDataBit));
                     configError = true;
                     return;
                 }
+
+                producesInputBit = true;
             }
 
             if (processVariableProducer[pvIndex] != nullptr)
@@ -1347,6 +1356,28 @@ void loadModules(void)
                     processVariableProducer[pvIndex]);
                 configError = true;
                 return;
+            }
+
+            if (producesInputBit)
+            {
+                if (inputBitProducer[inputDataBit] != nullptr)
+                {
+                    printf(
+                        "Encoder module entry %lu data bit %lu is already produced by %s module entry %lu\n",
+                        static_cast<unsigned long>(moduleIndex),
+                        static_cast<unsigned long>(inputDataBit),
+                        inputBitProducer[inputDataBit],
+                        static_cast<unsigned long>(
+                            inputBitProducerEntry[inputDataBit]));
+                    configError = true;
+                    return;
+                }
+
+                inputBitProducer[inputDataBit] =
+                    "Encoder";
+
+                inputBitProducerEntry[inputDataBit] =
+                    moduleIndex;
             }
 
             processVariableProducer[pvIndex] =
@@ -1542,6 +1573,9 @@ void loadModules(void)
                 return;
             }
 
+            bool producesInputBit = false;
+            uint32_t inputDataBit = 0U;
+
             JsonVariantConst indexPinValue =
                 moduleObject["Index Pin"];
 
@@ -1592,18 +1626,20 @@ void loadModules(void)
                     return;
                 }
 
-                const uint32_t dataBit =
+                inputDataBit =
                     dataBitValue.as<uint32_t>();
 
-                if (dataBit >= 32U)
+                if (inputDataBit >= 32U)
                 {
                     printf(
                         "QDC module entry %lu index Data Bit %lu is out of range\n",
                         static_cast<unsigned long>(moduleIndex),
-                        static_cast<unsigned long>(dataBit));
+                        static_cast<unsigned long>(inputDataBit));
                     configError = true;
                     return;
                 }
+
+                producesInputBit = true;
             }
 
             if (processVariableProducer[pvIndex] != nullptr)
@@ -1615,6 +1651,28 @@ void loadModules(void)
                     processVariableProducer[pvIndex]);
                 configError = true;
                 return;
+            }
+
+            if (producesInputBit)
+            {
+                if (inputBitProducer[inputDataBit] != nullptr)
+                {
+                    printf(
+                        "QDC module entry %lu data bit %lu is already produced by %s module entry %lu\n",
+                        static_cast<unsigned long>(moduleIndex),
+                        static_cast<unsigned long>(inputDataBit),
+                        inputBitProducer[inputDataBit],
+                        static_cast<unsigned long>(
+                            inputBitProducerEntry[inputDataBit]));
+                    configError = true;
+                    return;
+                }
+
+                inputBitProducer[inputDataBit] =
+                    "QDC";
+
+                inputBitProducerEntry[inputDataBit] =
+                    moduleIndex;
             }
 
             processVariableProducer[pvIndex] =
@@ -1758,6 +1816,28 @@ void loadModules(void)
                     configError = true;
                     return;
                 }
+            }
+
+            if (!strcmp(mode,"Input"))
+            {
+                if (inputBitProducer[dataBit] != nullptr)
+                {
+                    printf(
+                        "Digital Pin module entry %lu data bit %lu is already produced by %s module entry %lu\n",
+                        static_cast<unsigned long>(moduleIndex),
+                        static_cast<unsigned long>(dataBit),
+                        inputBitProducer[dataBit],
+                        static_cast<unsigned long>(
+                            inputBitProducerEntry[dataBit]));
+                    configError = true;
+                    return;
+                }
+
+                inputBitProducer[dataBit] =
+                    "Digital Pin";
+
+                inputBitProducerEntry[dataBit] =
+                    moduleIndex;
             }
         }
 
