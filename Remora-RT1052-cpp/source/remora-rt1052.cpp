@@ -252,7 +252,7 @@ int8_t checkJson()
 }
 
 
-void moveJson()
+bool moveJson()
 {
 	uint32_t pages;
 	uint32_t sectors;
@@ -271,7 +271,7 @@ void moveJson()
 		(jsonLength > JSON_BUFF_SIZE))
 	{
 		printf("JSON Config byte length incorrect\n");
-		return;
+		return false;
 	}
 
     // how many pages are needed to be written. The first 4 bytes of the storage location will contain the length of the JSON file
@@ -321,7 +321,8 @@ void moveJson()
 	status_t status = flexspi_nor_enable_quad_mode(FLEXSPI);
 	if (status != kStatus_Success)
 	{
-	  return;
+	  PRINTF("Enable quad mode failure !\r\n");
+	  return false;
 	}
 
 	Flash_Write_Address = JSON_STORAGE_ADDRESS;
@@ -332,7 +333,7 @@ void moveJson()
 		if (status != kStatus_Success)
 		{
 		  PRINTF("Erase sector failure !\r\n");
-		  return;
+		  return false;
 		}
 	}
 
@@ -404,11 +405,12 @@ void moveJson()
 		if (status != kStatus_Success)
 		{
 		 PRINTF("Page program failure !\r\n");
-		 return;
+		 return false;
 		}
 	}
 
 	printf("Configuration file moved\n");
+	return true;
 
 }
 
@@ -1778,9 +1780,11 @@ int main(void)
 
 			if (checkJson() > 0)
 			{
-				printf("Moving new configuration file to Flash storage and reset\n");
-				moveJson();
-				NVIC_SystemReset();
+				printf("Moving new configuration file to Flash storage\n");
+				if (moveJson())
+				{
+					NVIC_SystemReset();
+				}
 			}
 		}
     }
