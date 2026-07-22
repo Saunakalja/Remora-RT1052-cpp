@@ -15,15 +15,124 @@ void createEncoder()
             comment);
     }
 
-    int pv = module["PV[i]"];
-    const char* pinA = module["ChA Pin"];
-    const char* pinB = module["ChB Pin"];
-    const char* pinI = module["Index Pin"];
-    int dataBit = module["Data Bit"];
+    JsonVariantConst pvValue =
+        module["PV[i]"];
+
+    if (!pvValue.is<uint32_t>())
+    {
+        printf(
+            "Encoder PV index is missing or is not an unsigned integer\n");
+        return;
+    }
+
+    const uint32_t pv =
+        pvValue.as<uint32_t>();
+
+    if (pv >= VARIABLES)
+    {
+        printf(
+            "Encoder PV index %lu is out of range\n",
+            static_cast<unsigned long>(
+                pv));
+        return;
+    }
+
+    JsonVariantConst pinAValue =
+        module["ChA Pin"];
+
+    if (!pinAValue.is<const char*>())
+    {
+        printf(
+            "Encoder channel A pin is missing or is not a string\n");
+        return;
+    }
+
+    const char* pinA =
+        pinAValue.as<const char*>();
+
+    if ((pinA == nullptr) ||
+        (pinA[0] == '\0'))
+    {
+        printf(
+            "Encoder channel A pin is empty\n");
+        return;
+    }
+
+    JsonVariantConst pinBValue =
+        module["ChB Pin"];
+
+    if (!pinBValue.is<const char*>())
+    {
+        printf(
+            "Encoder channel B pin is missing or is not a string\n");
+        return;
+    }
+
+    const char* pinB =
+        pinBValue.as<const char*>();
+
+    if ((pinB == nullptr) ||
+        (pinB[0] == '\0'))
+    {
+        printf(
+            "Encoder channel B pin is empty\n");
+        return;
+    }
+
+    const char* pinI =
+        nullptr;
+
+    uint32_t dataBit =
+        0U;
+
+    JsonVariantConst pinIValue =
+        module["Index Pin"];
+
+    if (!pinIValue.isNull())
+    {
+        if (!pinIValue.is<const char*>())
+        {
+            printf(
+                "Encoder index pin is not a string\n");
+            return;
+        }
+
+        pinI =
+            pinIValue.as<const char*>();
+
+        if ((pinI == nullptr) ||
+            (pinI[0] == '\0'))
+        {
+            printf(
+                "Encoder index pin is empty\n");
+            return;
+        }
+
+        JsonVariantConst dataBitValue =
+            module["Data Bit"];
+
+        if (!dataBitValue.is<uint32_t>())
+        {
+            printf(
+                "Encoder data bit is missing or is not an unsigned integer\n");
+            return;
+        }
+
+        dataBit =
+            dataBitValue.as<uint32_t>();
+
+        if (dataBit >= 32U)
+        {
+            printf(
+                "Encoder data bit %lu is out of range\n",
+                static_cast<unsigned long>(
+                    dataBit));
+            return;
+        }
+    }
 
     printf("Creating Quadrature Encoder at pins %s and %s\n", pinA, pinB);
 
-    
     ptrProcessVariable[pv]  = &txData.processVariable[pv];
     ptrInputs = &txData.inputs;
 
@@ -35,7 +144,7 @@ void createEncoder()
     else
     {
         printf("  Encoder has index at pin %s\n", pinI);
-        Module* encoder = new Encoder(*ptrProcessVariable[pv], *ptrInputs, dataBit, pinA, pinB, pinI);
+        Module* encoder = new Encoder(*ptrProcessVariable[pv], *ptrInputs, static_cast<int>(dataBit), pinA, pinB, pinI);
         baseThread->registerModule(encoder);
     }
 }
