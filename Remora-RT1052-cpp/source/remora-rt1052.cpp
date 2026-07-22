@@ -1523,6 +1523,19 @@ void loadModules(void)
                 return;
             }
 
+            if (gpioPinNamesReferToSamePin(
+                    channelAPin,
+                    channelBPin))
+            {
+                printf(
+                    "QDC module entry %lu channel A pin %s conflicts with channel B pin %s\n",
+                    static_cast<unsigned long>(moduleIndex),
+                    channelAPin,
+                    channelBPin);
+                configError = true;
+                return;
+            }
+
             JsonVariantConst filterPeriodValue =
                 moduleObject["Filter PER"];
 
@@ -1610,6 +1623,32 @@ void loadModules(void)
                         "QDC module entry %lu index pin %s is invalid\n",
                         static_cast<unsigned long>(moduleIndex),
                         indexPin);
+                    configError = true;
+                    return;
+                }
+
+                if (gpioPinNamesReferToSamePin(
+                        indexPin,
+                        channelAPin))
+                {
+                    printf(
+                        "QDC module entry %lu index pin %s conflicts with channel A pin %s\n",
+                        static_cast<unsigned long>(moduleIndex),
+                        indexPin,
+                        channelAPin);
+                    configError = true;
+                    return;
+                }
+
+                if (gpioPinNamesReferToSamePin(
+                        indexPin,
+                        channelBPin))
+                {
+                    printf(
+                        "QDC module entry %lu index pin %s conflicts with channel B pin %s\n",
+                        static_cast<unsigned long>(moduleIndex),
+                        indexPin,
+                        channelBPin);
                     configError = true;
                     return;
                 }
