@@ -121,15 +121,39 @@ void NVMPG::update()
 
 	if (this->payloadReceived)
 	{
-		// copy the data to txData buffer
-		for (int i = 0; i < 53; i++)
+		uint32_t transmittedByteCount = 0U;
+
+		const status_t transferStatus =
+			LPUART_TransferGetSendCountEDMA(
+				NVMPG_LPUART,
+				&g_lpuartEdmaHandle,
+				&transmittedByteCount);
+
+		if (transferStatus == kStatus_NoTransferInProgress)
 		{
-			this->txData[i] =  this->ptrMpgData->payload[i+4];
+			// copy the data to txData buffer
+			for (int i = 0; i < 53; i++)
+			{
+				this->txData[i] =  this->ptrMpgData->payload[i+4];
+			}
+
+			const status_t sendStatus =
+				LPUART_SendEDMA(
+					NVMPG_LPUART,
+					&g_lpuartEdmaHandle,
+					&sendXfer);
+
+			if (sendStatus == kStatus_Success)
+			{
+				this->payloadReceived = false;
+			}
+			else if (sendStatus != kStatus_LPUART_TxBusy)
+			{
+				LPUART_TransferAbortSendEDMA(
+					NVMPG_LPUART,
+					&g_lpuartEdmaHandle);
+			}
 		}
-
-	    LPUART_SendEDMA(NVMPG_LPUART, &g_lpuartEdmaHandle, &sendXfer);
-
-	    this->payloadReceived = false;
 	}
 }
 

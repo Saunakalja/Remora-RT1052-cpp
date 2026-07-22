@@ -34,11 +34,11 @@ class NVMPG : public Module
 		volatile uint16_t 	*ptrData;
 
 		uint8_t txData[53] = {'\0'};
-		uint8_t rxData;
+		uint8_t rxData = 0U;
 		uint8_t i = 0;
 
-		uint16_t mask;
-		bool buttonState;
+		uint16_t mask = 0U;
+		bool buttonState = false;
 
 		bool serialReceived = false;
 		bool payloadReceived = false;
