@@ -18,6 +18,8 @@
 #include "extern.h"
 
 bool muxPinsXBAR(const char*,xbar_output_signal_t);
+bool isQdcPhasePinSupported(const char*);
+bool isQdcIndexPinNameValid(const char*);
 bool createQdc(void);
 
 class portInterrupt; // forward declaration

@@ -827,6 +827,10 @@ void loadModules(void)
 
     bool jointConfigured[JOINTS] = {};
 
+    const char* processVariableProducer[VARIABLES] = {};
+
+    bool qdcEncoderConfigured[MAX_INST_QDC_MOD] = {};
+
     uint32_t moduleIndex = 0U;
     for (JsonArrayConst::iterator it=Modules.begin(); it!=Modules.end(); ++it)
     {
@@ -1333,6 +1337,291 @@ void loadModules(void)
                     return;
                 }
             }
+
+            if (processVariableProducer[pvIndex] != nullptr)
+            {
+                printf(
+                    "Encoder module entry %lu PV index %lu is already produced by %s\n",
+                    static_cast<unsigned long>(moduleIndex),
+                    static_cast<unsigned long>(pvIndex),
+                    processVariableProducer[pvIndex]);
+                configError = true;
+                return;
+            }
+
+            processVariableProducer[pvIndex] =
+                "Encoder";
+        }
+
+        if (!strcmp(thread,"Base") &&
+            !strcmp(type,"QDC"))
+        {
+            const uint32_t filterPeriodMax = 255U;
+            const uint32_t filterCountMax = 7U;
+
+            JsonVariantConst pvValue =
+                moduleObject["PV[i]"];
+
+            if (!pvValue.is<uint32_t>())
+            {
+                printf(
+                    "QDC module entry %lu PV index is missing or is not an unsigned integer\n",
+                    static_cast<unsigned long>(moduleIndex));
+                configError = true;
+                return;
+            }
+
+            const uint32_t pvIndex =
+                pvValue.as<uint32_t>();
+
+            if (pvIndex >= VARIABLES)
+            {
+                printf(
+                    "QDC module entry %lu PV index %lu is out of range\n",
+                    static_cast<unsigned long>(moduleIndex),
+                    static_cast<unsigned long>(pvIndex));
+                configError = true;
+                return;
+            }
+
+            JsonVariantConst encNumberValue =
+                moduleObject["ENC No"];
+
+            if (!encNumberValue.is<uint32_t>())
+            {
+                printf(
+                    "QDC module entry %lu ENC No is missing or is not an unsigned integer\n",
+                    static_cast<unsigned long>(moduleIndex));
+                configError = true;
+                return;
+            }
+
+            const uint32_t encNumber =
+                encNumberValue.as<uint32_t>();
+
+            if ((encNumber < 1U) ||
+                (encNumber > MAX_INST_QDC_MOD))
+            {
+                printf(
+                    "QDC module entry %lu ENC No %lu is out of range\n",
+                    static_cast<unsigned long>(moduleIndex),
+                    static_cast<unsigned long>(encNumber));
+                configError = true;
+                return;
+            }
+
+            if (qdcEncoderConfigured[encNumber - 1U])
+            {
+                printf(
+                    "QDC module entry %lu ENC No %lu is already configured\n",
+                    static_cast<unsigned long>(moduleIndex),
+                    static_cast<unsigned long>(encNumber));
+                configError = true;
+                return;
+            }
+
+            JsonVariantConst channelAPinValue =
+                moduleObject["ChA Pin"];
+
+            if (!channelAPinValue.is<const char*>())
+            {
+                printf(
+                    "QDC module entry %lu channel A pin is missing or is not a string\n",
+                    static_cast<unsigned long>(moduleIndex));
+                configError = true;
+                return;
+            }
+
+            const char* channelAPin =
+                channelAPinValue.as<const char*>();
+
+            if ((channelAPin == nullptr) ||
+                (channelAPin[0] == '\0'))
+            {
+                printf(
+                    "QDC module entry %lu channel A pin is empty\n",
+                    static_cast<unsigned long>(moduleIndex));
+                configError = true;
+                return;
+            }
+
+            if (!isQdcPhasePinSupported(
+                    channelAPin))
+            {
+                printf(
+                    "QDC module entry %lu channel A pin %s cannot be multiplexed to QDC\n",
+                    static_cast<unsigned long>(moduleIndex),
+                    channelAPin);
+                configError = true;
+                return;
+            }
+
+            JsonVariantConst channelBPinValue =
+                moduleObject["ChB Pin"];
+
+            if (!channelBPinValue.is<const char*>())
+            {
+                printf(
+                    "QDC module entry %lu channel B pin is missing or is not a string\n",
+                    static_cast<unsigned long>(moduleIndex));
+                configError = true;
+                return;
+            }
+
+            const char* channelBPin =
+                channelBPinValue.as<const char*>();
+
+            if ((channelBPin == nullptr) ||
+                (channelBPin[0] == '\0'))
+            {
+                printf(
+                    "QDC module entry %lu channel B pin is empty\n",
+                    static_cast<unsigned long>(moduleIndex));
+                configError = true;
+                return;
+            }
+
+            if (!isQdcPhasePinSupported(
+                    channelBPin))
+            {
+                printf(
+                    "QDC module entry %lu channel B pin %s cannot be multiplexed to QDC\n",
+                    static_cast<unsigned long>(moduleIndex),
+                    channelBPin);
+                configError = true;
+                return;
+            }
+
+            JsonVariantConst filterPeriodValue =
+                moduleObject["Filter PER"];
+
+            if (!filterPeriodValue.is<uint32_t>())
+            {
+                printf(
+                    "QDC module entry %lu Filter PER is missing or is not an unsigned integer\n",
+                    static_cast<unsigned long>(moduleIndex));
+                configError = true;
+                return;
+            }
+
+            const uint32_t filterPeriod =
+                filterPeriodValue.as<uint32_t>();
+
+            if (filterPeriod > filterPeriodMax)
+            {
+                printf(
+                    "QDC module entry %lu Filter PER value %lu is out of range\n",
+                    static_cast<unsigned long>(moduleIndex),
+                    static_cast<unsigned long>(filterPeriod));
+                configError = true;
+                return;
+            }
+
+            JsonVariantConst filterCountValue =
+                moduleObject["Filter CNT"];
+
+            if (!filterCountValue.is<uint32_t>())
+            {
+                printf(
+                    "QDC module entry %lu Filter CNT is missing or is not an unsigned integer\n",
+                    static_cast<unsigned long>(moduleIndex));
+                configError = true;
+                return;
+            }
+
+            const uint32_t filterCount =
+                filterCountValue.as<uint32_t>();
+
+            if (filterCount > filterCountMax)
+            {
+                printf(
+                    "QDC module entry %lu Filter CNT value %lu is out of range\n",
+                    static_cast<unsigned long>(moduleIndex),
+                    static_cast<unsigned long>(filterCount));
+                configError = true;
+                return;
+            }
+
+            JsonVariantConst indexPinValue =
+                moduleObject["Index Pin"];
+
+            if (!indexPinValue.isNull())
+            {
+                if (!indexPinValue.is<const char*>())
+                {
+                    printf(
+                        "QDC module entry %lu index pin is not a string\n",
+                        static_cast<unsigned long>(moduleIndex));
+                    configError = true;
+                    return;
+                }
+
+                const char* indexPin =
+                    indexPinValue.as<const char*>();
+
+                if ((indexPin == nullptr) ||
+                    (indexPin[0] == '\0'))
+                {
+                    printf(
+                        "QDC module entry %lu index pin is empty\n",
+                        static_cast<unsigned long>(moduleIndex));
+                    configError = true;
+                    return;
+                }
+
+                if (!isQdcIndexPinNameValid(
+                        indexPin))
+                {
+                    printf(
+                        "QDC module entry %lu index pin %s is invalid\n",
+                        static_cast<unsigned long>(moduleIndex),
+                        indexPin);
+                    configError = true;
+                    return;
+                }
+
+                JsonVariantConst dataBitValue =
+                    moduleObject["Data Bit"];
+
+                if (!dataBitValue.is<uint32_t>())
+                {
+                    printf(
+                        "QDC module entry %lu index Data Bit is missing or is not an unsigned integer\n",
+                        static_cast<unsigned long>(moduleIndex));
+                    configError = true;
+                    return;
+                }
+
+                const uint32_t dataBit =
+                    dataBitValue.as<uint32_t>();
+
+                if (dataBit >= 32U)
+                {
+                    printf(
+                        "QDC module entry %lu index Data Bit %lu is out of range\n",
+                        static_cast<unsigned long>(moduleIndex),
+                        static_cast<unsigned long>(dataBit));
+                    configError = true;
+                    return;
+                }
+            }
+
+            if (processVariableProducer[pvIndex] != nullptr)
+            {
+                printf(
+                    "QDC module entry %lu PV index %lu is already produced by %s\n",
+                    static_cast<unsigned long>(moduleIndex),
+                    static_cast<unsigned long>(pvIndex),
+                    processVariableProducer[pvIndex]);
+                configError = true;
+                return;
+            }
+
+            processVariableProducer[pvIndex] =
+                "QDC";
+
+            qdcEncoderConfigured[encNumber - 1U] =
+                true;
         }
 
         if (!strcmp(thread,"Servo") &&

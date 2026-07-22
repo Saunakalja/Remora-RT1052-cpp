@@ -46,7 +46,7 @@ static bool resolveQdcPhaseMuxPin(
   return true;
 }
 
-static bool isQdcPhasePinSupported(
+bool isQdcPhasePinSupported(
     const char* pin)
 {
   uint8_t mux_op_pin = 0U;
@@ -54,6 +54,36 @@ static bool isQdcPhasePinSupported(
   return resolveQdcPhaseMuxPin(
       pin,
       &mux_op_pin);
+}
+
+bool isQdcIndexPinNameValid(
+    const char* pin)
+{
+  if (pin == nullptr)
+  {
+    return false;
+  }
+
+  if ((strlen(pin) != 5U) ||
+      (pin[0] != 'P') ||
+      ((pin[1] != '3') &&
+       (pin[1] != '4')) ||
+      (pin[2] != '_') ||
+      (pin[3] < '0') ||
+      (pin[3] > '9') ||
+      (pin[4] < '0') ||
+      (pin[4] > '9'))
+  {
+    return false;
+  }
+
+  const uint32_t pinNumber =
+      static_cast<uint32_t>(
+          pin[3] - '0') * 10U +
+      static_cast<uint32_t>(
+          pin[4] - '0');
+
+  return pinNumber <= 31U;
 }
 
 bool muxPinsXBAR(const char* pin,xbar_output_signal_t kXBARA1_OutputEncInput)
@@ -391,15 +421,8 @@ bool createQdc()
             return false;
         }
 
-        if ((strlen(pinI) != 5U) ||
-            (pinI[0] != 'P') ||
-            ((pinI[1] != '3') &&
-             (pinI[1] != '4')) ||
-            (pinI[2] != '_') ||
-            (pinI[3] < '0') ||
-            (pinI[3] > '9') ||
-            (pinI[4] < '0') ||
-            (pinI[4] > '9'))
+        if (!isQdcIndexPinNameValid(
+                pinI))
         {
             printf(
                 "QDC index pin %s is invalid\r\n",
