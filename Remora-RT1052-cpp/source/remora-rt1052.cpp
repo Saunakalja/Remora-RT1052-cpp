@@ -2056,12 +2056,11 @@ int main(void)
 
         EthernetTasks();
 
-    	if (DMA::DMAtransferDone)
-    	{
-    		dmaThread->DMAptr->updateBuffers();
-    		dmaThread->run();
-    		DMA::DMAtransferDone = false;
-    	}
+	if (DMA::takeTransferDone())
+	{
+		dmaThread->DMAptr->updateBuffers();
+		dmaThread->run();
+	}
 
         if (newJson)
 		{

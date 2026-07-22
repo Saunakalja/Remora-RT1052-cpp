@@ -98,3 +98,20 @@ void DMA::updateBuffers(void)
 	}
 }
 
+
+bool DMA::takeTransferDone(void)
+{
+	const uint32_t primask =
+		__get_PRIMASK();
+
+	__disable_irq();
+
+	const bool transferDone =
+		DMAtransferDone;
+
+	DMAtransferDone = false;
+
+	__set_PRIMASK(primask);
+
+	return transferDone;
+}

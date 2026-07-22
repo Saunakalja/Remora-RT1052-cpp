@@ -39,6 +39,7 @@ class DMA
 		void startDMA(void);
         void stopDMA(void);
         void updateBuffers(void);
+		static bool takeTransferDone(void);
 
 		static volatile bool	DMAtransferDone;
 		edma_handle_t 			EDMA_Handle;
