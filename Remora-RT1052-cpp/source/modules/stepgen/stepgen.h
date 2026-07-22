@@ -17,7 +17,7 @@ class Stepgen : public Module
   private:
 
     int jointNumber;              	// LinuxCNC joint number
-    int mask;
+    uint32_t mask;
 
     std::string step, direction;	 // physical pins connections
 
@@ -29,10 +29,13 @@ class Stepgen : public Module
     int32_t rawCount;             	// current position raw count - not currently used - mirrors original stepgen.c
     volatile int32_t *ptrFeedback;       	// pointer where to put the feedback
     volatile uint8_t *ptrJointEnable;
-    int32_t DDSaccumulator;       	// Direct Digital Synthesis (DDS) accumulator
+    uint32_t DDSaccumulator;       	// Direct Digital Synthesis (DDS) accumulator
     float   frequencyScale;		  	  // frequency scale
   	int32_t	DDSaddValue;		  	    // DDS accumulator add vdd value
     int32_t stepBit;                // position in the DDS accumulator that triggers a step pulse
+    uint32_t stepMask;
+    int32_t maxFrequencyCommand;
+    bool isValid;
 
   public:
 

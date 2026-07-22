@@ -1,5 +1,7 @@
 #include "stepgen.h"
 
+#include <limits>
+
 
 /***********************************************************************
                 MODULE CONFIGURATION AND CREATION FROM JSON     
@@ -38,9 +40,33 @@ void createStepgen()
                 METHOD DEFINITIONS
 ************************************************************************/
 
+static int32_t incrementRawCount(
+    int32_t rawCount)
+{
+    if (rawCount == std::numeric_limits<int32_t>::max())
+    {
+        return std::numeric_limits<int32_t>::min();
+    }
+
+    return rawCount + 1;
+}
+
+
+static int32_t decrementRawCount(
+    int32_t rawCount)
+{
+    if (rawCount == std::numeric_limits<int32_t>::min())
+    {
+        return std::numeric_limits<int32_t>::max();
+    }
+
+    return rawCount - 1;
+}
+
+
 Stepgen::Stepgen(int32_t threadFreq, int jointNumber, std::string step, std::string direction, int stepBit, volatile int32_t &ptrFrequencyCommand, volatile int32_t &ptrFeedback, volatile uint8_t &ptrJointEnable) :
 	jointNumber(jointNumber),
-	mask(0),
+	mask(0U),
 	step(step),
 	direction(direction),
 	isEnabled(false),
@@ -54,13 +80,45 @@ Stepgen::Stepgen(int32_t threadFreq, int jointNumber, std::string step, std::str
 	frequencyScale(0.0F),
 	DDSaddValue(0),
 	stepBit(stepBit),
+	stepMask(0U),
+	maxFrequencyCommand(0),
+	isValid(false),
 	stepPin(nullptr),
 	directionPin(nullptr)
 {
 	this->stepPin = new Pin(this->step, OUTPUT);
 	this->directionPin = new Pin(this->direction, OUTPUT);
-	this->frequencyScale = (float)(1 << this->stepBit) / (float)threadFreq;
-	this->mask = 1 << this->jointNumber;
+
+	if ((threadFreq <= 0) ||
+		(this->stepBit < 0) ||
+		(this->stepBit > 30) ||
+		(this->jointNumber < 0) ||
+		(this->jointNumber >= 32))
+	{
+		return;
+	}
+
+	this->maxFrequencyCommand =
+		threadFreq;
+
+	this->stepMask =
+		uint32_t{1} <<
+		static_cast<uint32_t>(
+			this->stepBit);
+
+	this->frequencyScale =
+		static_cast<float>(
+			this->stepMask) /
+		static_cast<float>(
+			threadFreq);
+
+	this->mask =
+		uint32_t{1} <<
+		static_cast<uint32_t>(
+			this->jointNumber);
+
+	this->isValid =
+		true;
 }
 
 
@@ -82,18 +140,47 @@ void Stepgen::slowUpdate()
 
 void Stepgen::makePulses()
 {
-	int32_t stepNow = 0;
+	uint32_t stepNow = 0U;
 
-	this->isEnabled = ((*(this->ptrJointEnable) & this->mask) != 0);
+	if (!this->isValid)
+	{
+		this->isEnabled = false;
+		return;
+	}
+
+	this->isEnabled =
+		((*(this->ptrJointEnable) & this->mask) != 0U);
 
 	if (this->isEnabled == true)  												// this Step generator is enables so make the pulses
 	{
-		this->frequencyCommand = *(this->ptrFrequencyCommand);            		// Get the latest frequency command via pointer to the data source
-		this->DDSaddValue = this->frequencyCommand * this->frequencyScale;		// Scale the frequency command to get the DDS add value
+		int32_t command =
+			*(this->ptrFrequencyCommand);            							// Get the latest frequency command via pointer to the data source
+
+		if (command > this->maxFrequencyCommand)
+		{
+			command =
+				this->maxFrequencyCommand;
+		}
+		else if (command < -this->maxFrequencyCommand)
+		{
+			command =
+				-this->maxFrequencyCommand;
+		}
+
+		this->frequencyCommand =
+			command;
+
+		this->DDSaddValue =
+			static_cast<int32_t>(
+				static_cast<float>(
+					this->frequencyCommand) *
+				this->frequencyScale);											// Scale the frequency command to get the DDS add value
 		stepNow = this->DDSaccumulator;                           				// Save the current DDS accumulator value
-		this->DDSaccumulator += this->DDSaddValue;           	  				// Update the DDS accumulator with the new add value
+		this->DDSaccumulator +=
+			static_cast<uint32_t>(
+				this->DDSaddValue);           	  								// Update the DDS accumulator with the new add value
 		stepNow ^= this->DDSaccumulator;                          				// Test for changes in the low half of the DDS accumulator
-		stepNow &= (1L << this->stepBit);                         				// Check for the step bit
+		stepNow &= this->stepMask;                         						// Check for the step bit
 		//this->rawCount = this->DDSaccumulator >> this->stepBit;   				// Update the position raw count
 
 		if (this->DDSaddValue > 0)												// The sign of the DDS add value indicates the desired direction
@@ -111,11 +198,15 @@ void Stepgen::makePulses()
 			this->stepPin->set(true);										// Raise step pin - A4988 / DRV8825 stepper drivers only need 200ns setup time
             if (this->isForward)
             {
-                ++this->rawCount;
+                this->rawCount =
+					incrementRawCount(
+						this->rawCount);
             }
             else
             {
-                --this->rawCount;
+                this->rawCount =
+					decrementRawCount(
+						this->rawCount);
             }
             *(this->ptrFeedback) = this->rawCount;							// Update position feedback via pointer to the data receiver
 		}
@@ -127,7 +218,10 @@ void Stepgen::makePulses()
 
 void Stepgen::stopPulses()
 {
-	this->stepPin->set(false);	// Reset step pin
+	if (this->stepPin != nullptr)
+	{
+		this->stepPin->set(false);	// Reset step pin
+	}
 }
 
 
