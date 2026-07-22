@@ -277,6 +277,12 @@ static err_t IAP_tftp_send_ack_packet(struct udp_pcb *upcb, const ip_addr_t *to,
   err_t err;
   struct pbuf *pkt_buf; /* Chain of pbuf's to be sent */
 
+  if ((upcb == nullptr) ||
+      (to == nullptr))
+  {
+    return ERR_ARG;
+  }
+
   /* create the maximum possible size packet that a TFTP ACK packet can be */
   char packet[TFTP_ACK_PKT_LEN];
 
@@ -294,15 +300,26 @@ static err_t IAP_tftp_send_ack_packet(struct udp_pcb *upcb, const ip_addr_t *to,
   IAP_tftp_set_block(packet, block);
 
   /* PBUF_TRANSPORT - specifies the transport layer */
-  pkt_buf = pbuf_alloc(PBUF_TRANSPORT, TFTP_ACK_PKT_LEN, PBUF_POOL);
+  pkt_buf = pbuf_alloc(PBUF_TRANSPORT, TFTP_ACK_PKT_LEN, PBUF_RAM);
 
   if (!pkt_buf)      /*if the packet pbuf == NULL exit and EndTransfertransmission */
   {
     return ERR_MEM;
   }
 
+  if (pkt_buf->tot_len < TFTP_ACK_PKT_LEN)
+  {
+    pbuf_free(pkt_buf);
+    return ERR_MEM;
+  }
+
   /* Copy the original data buffer over to the packet buffer's payload */
-  memcpy(pkt_buf->payload, packet, TFTP_ACK_PKT_LEN);
+  err = pbuf_take(pkt_buf, packet, TFTP_ACK_PKT_LEN);
+  if (err != ERR_OK)
+  {
+    pbuf_free(pkt_buf);
+    return err;
+  }
 
   /* Sending packet by UDP protocol */
   err = udp_sendto(upcb, pkt_buf, to, to_port);
@@ -890,22 +907,29 @@ static void IAP_tftp_cleanup_wr(struct udp_pcb *upcb, tftp_connection_args *args
     sys_untimeout(
         IAP_tftp_timeout,
         args);
+
+    /* Free the tftp_connection_args structure */
+    mem_free(args);
   }
 
-  /* Free the tftp_connection_args structure */
-  mem_free(args);
+  if ((upcb != nullptr) &&
+      (upcb != UDPpcb))
+  {
+    /* Disconnect the udp_pcb */
+    udp_disconnect(upcb);
 
-  /* Disconnect the udp_pcb */
-  udp_disconnect(upcb);
-
-  /* close the connection */
-  udp_remove(upcb);
+    /* close the connection */
+    udp_remove(upcb);
+  }
 
   tftpTransferActive =
       false;
 
-  /* reset the callback function */
-  udp_recv(UDPpcb, IAP_tftp_recv_callback, NULL);
+  if (UDPpcb != nullptr)
+  {
+    /* reset the callback function */
+    udp_recv(UDPpcb, IAP_tftp_recv_callback, NULL);
+  }
 
 }
 
