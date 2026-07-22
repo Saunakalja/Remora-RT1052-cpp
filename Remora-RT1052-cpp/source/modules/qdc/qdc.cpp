@@ -619,7 +619,31 @@ Qdc::Qdc(volatile float &ptrEncoderCount, volatile uint32_t &ptrData, ENC_Type* 
     ENC_DoSoftwareLoadInitialPositionValue(this->encBase); /* Update the position counter with initial value. */
 
     this->hasIndex = true;
-    this->indexPulse = (PRU_BASEFREQ / PRU_SERVOFREQ) * 3;          // output the index pulse for 3 servo thread periods so LinuxCNC sees it
+
+    uint64_t indexPulseTicks = 1U;
+
+    if ((base_freq != 0U) &&
+        (servo_freq != 0U))
+    {
+        const uint64_t indexPulseNumerator =
+            static_cast<uint64_t>(base_freq) * 3U;
+
+        const uint64_t servoFrequency =
+            static_cast<uint64_t>(servo_freq);
+
+        indexPulseTicks =
+            (indexPulseNumerator + servoFrequency - 1U) /
+            servoFrequency;
+    }
+
+    const uint64_t maximumIndexPulse =
+        static_cast<uint64_t>(UINT32_MAX);
+
+    this->indexPulse =
+        static_cast<uint32_t>(
+            (indexPulseTicks > maximumIndexPulse)
+                ? maximumIndexPulse
+                : indexPulseTicks);
     this->indexCount = 0;
     this->count = 0;								                // initialise the count to 0
     this->pulseCount = 0U;                                          // number of base thread periods to pulse the index output
@@ -660,15 +684,17 @@ void Qdc::update()
       {
           *(this->ptrEncoderCount) =
               capturedIndexCount;
+          // The countdown is the exact number of Base intervals held high.
           this->pulseCount = this->indexPulse;
           *(this->ptrData) |= this->mask;                 // set bit in data source high
       }
-      else if (this->pulseCount > 0U)                     // maintain both index output and encoder count for the latch period
+      else if (this->pulseCount > 1U)                     // maintain both index output and encoder count for the latch period
       {
           this->pulseCount--;                             // decrement the counter
       }
       else
       {
+          this->pulseCount = 0U;
           *(this->ptrData) &= ~this->mask;                // set bit in data source low
           *(this->ptrEncoderCount) = this->count;         // update encoder count
       }
