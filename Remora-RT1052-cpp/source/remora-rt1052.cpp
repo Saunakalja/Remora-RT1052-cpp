@@ -1022,6 +1022,26 @@ void loadModules(void)
                 return;
             }
 
+            if (stepPin[1] != '1')
+            {
+                printf(
+                    "DMAstepgen module entry %lu step pin %s is not on GPIO1\n",
+                    static_cast<unsigned long>(moduleIndex),
+                    stepPin);
+                configError = true;
+                return;
+            }
+
+            if (directionPin[1] != '1')
+            {
+                printf(
+                    "DMAstepgen module entry %lu direction pin %s is not on GPIO1\n",
+                    static_cast<unsigned long>(moduleIndex),
+                    directionPin);
+                configError = true;
+                return;
+            }
+
             if (gpioPinNamesReferToSamePin(
                     stepPin,
                     directionPin))
