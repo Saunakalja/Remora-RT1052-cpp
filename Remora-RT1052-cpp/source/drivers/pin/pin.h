@@ -28,6 +28,8 @@ class Pin
         uint16_t            pin;
         gpio_pin_config_t   config;
         GPIO_Type *			GPIOx;
+        uint32_t            mask;
+        bool                valid;
 
     public:
 
@@ -35,11 +37,23 @@ class Pin
 
         inline bool get()
         {
+            if ((!this->valid) ||
+                (this->GPIOx == nullptr))
+            {
+                return false;
+            }
+
             return GPIO_PinRead(this->GPIOx, this->pin);
         }
 
         inline void set(bool value)
         {
+            if ((!this->valid) ||
+                (this->GPIOx == nullptr))
+            {
+                return;
+            }
+
         	GPIO_PinWrite(this->GPIOx, this->pin, value);
         }
 };
