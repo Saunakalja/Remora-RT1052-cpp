@@ -137,6 +137,7 @@ volatile int32_t* ptrJointFeedback[JOINTS];
 volatile uint8_t* ptrJointEnable;
 volatile float*   ptrSetPoint[VARIABLES];
 volatile float*   ptrProcessVariable[VARIABLES];
+const char*       processVariableOwner[VARIABLES] = {nullptr};
 volatile uint32_t* ptrInputs;
 volatile uint32_t* ptrOutputs;
 volatile uint16_t* ptrNVMPGInputs;

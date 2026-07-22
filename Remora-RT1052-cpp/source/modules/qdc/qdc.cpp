@@ -466,6 +466,16 @@ bool createQdc()
         }
     }
 
+    if (processVariableOwner[pv] != nullptr)
+    {
+        printf(
+            "QDC PV index %lu is already owned by %s\r\n",
+            static_cast<unsigned long>(
+                pv),
+            processVariableOwner[pv]);
+        return false;
+    }
+
     if ((comment != nullptr) &&
         (comment[0] != '\0'))
     {
@@ -528,6 +538,8 @@ bool createQdc()
 
     ptrProcessVariable[pv]  = &txData.processVariable[pv];
     ptrInputs = &txData.inputs;
+    processVariableOwner[pv] =
+        "QDC";
     qdc[encNumber - 1U] =
         qdcModule;
     baseThread->registerModule(qdcModule);

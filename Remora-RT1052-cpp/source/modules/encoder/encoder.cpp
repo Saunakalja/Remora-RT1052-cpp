@@ -5,14 +5,16 @@
 ************************************************************************/
 void createEncoder()
 {
-    const char* comment = module["Comment"];
+    const char* comment =
+        nullptr;
 
-    if ((comment != nullptr) &&
-        (comment[0] != '\0'))
+    JsonVariantConst commentValue =
+        module["Comment"];
+
+    if (commentValue.is<const char*>())
     {
-        printf(
-            "%s\n",
-            comment);
+        comment =
+            commentValue.as<const char*>();
     }
 
     JsonVariantConst pvValue =
@@ -131,22 +133,55 @@ void createEncoder()
         }
     }
 
+    if (processVariableOwner[pv] != nullptr)
+    {
+        printf(
+            "Encoder PV index %lu is already owned by %s\n",
+            static_cast<unsigned long>(
+                pv),
+            processVariableOwner[pv]);
+        return;
+    }
+
+    if ((comment != nullptr) &&
+        (comment[0] != '\0'))
+    {
+        printf(
+            "%s\n",
+            comment);
+    }
+
     printf("Creating Quadrature Encoder at pins %s and %s\n", pinA, pinB);
 
-    ptrProcessVariable[pv]  = &txData.processVariable[pv];
-    ptrInputs = &txData.inputs;
+    Module* encoder = nullptr;
 
     if (pinI == nullptr)
     {
-        Module* encoder = new Encoder(*ptrProcessVariable[pv], pinA, pinB);
-        baseThread->registerModule(encoder);
+        encoder =
+            new Encoder(
+                txData.processVariable[pv],
+                pinA,
+                pinB);
     }
     else
     {
         printf("  Encoder has index at pin %s\n", pinI);
-        Module* encoder = new Encoder(*ptrProcessVariable[pv], *ptrInputs, static_cast<int>(dataBit), pinA, pinB, pinI);
-        baseThread->registerModule(encoder);
+        encoder =
+            new Encoder(
+                txData.processVariable[pv],
+                txData.inputs,
+                static_cast<int>(
+                    dataBit),
+                pinA,
+                pinB,
+                pinI);
     }
+
+    ptrProcessVariable[pv]  = &txData.processVariable[pv];
+    ptrInputs = &txData.inputs;
+    processVariableOwner[pv] =
+        "Encoder";
+    baseThread->registerModule(encoder);
 }
 
 /***********************************************************************
