@@ -172,7 +172,6 @@ JsonObject module;
 int8_t checkJson()
 {
 	metadata_t* meta = (metadata_t*)(XIP_BASE + JSON_UPLOAD_ADDRESS);
-	uint32_t* json = (uint32_t*)(XIP_BASE + JSON_UPLOAD_ADDRESS + METADATA_LEN);
 	const uint32_t jsonLength =
 		meta->jsonLength;
 

@@ -225,7 +225,13 @@ void udp_data_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip
 		//pragma pack should support memcpy, we should later look into the networking driver and see where p comes from,
 		// and see if we can provide a data location to memcpy it in to which should further reduce cpu-time.
 		// Of course not a lot but every little bit is enough.
-		memcpy(&rxData.rxBuffer, incomingData, sizeof(incomingData));
+		for (size_t i = 0;
+			 i < sizeof(incomingData);
+			 i++)
+		{
+			rxData.rxBuffer[i] =
+				incomingData[i];
+		}
 
 		// restore previous interrupt state
 		__set_PRIMASK(

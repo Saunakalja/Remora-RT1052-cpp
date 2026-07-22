@@ -446,7 +446,6 @@ static void IAP_wrq_recv_callback(void *_args, struct udp_pcb *upcb, struct pbuf
   }
 
   uint8_t data_buffer[512];
-  uint16_t count = 0;
   status_t status;
 
   memset(data_buffer, 0x0, sizeof(data_buffer));
@@ -517,8 +516,6 @@ static void IAP_wrq_recv_callback(void *_args, struct udp_pcb *upcb, struct pbuf
 	}
 
     total_count += payloadSize;
-
-    count = payloadSize;
 
     /* update our block number to match the block number just received */
     args->block++;
