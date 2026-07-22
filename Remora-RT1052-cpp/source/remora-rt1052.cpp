@@ -634,7 +634,7 @@ void configThreads()
     JsonVariantConst threadsValue =
         doc["Threads"];
 
-    if (!threadsValue.is<JsonArrayConst>())
+    if (!threadsValue.is<JsonArray>())
     {
         printf("Threads configuration is not an array\n");
         configError = true;
@@ -671,7 +671,7 @@ void configThreads()
         JsonVariantConst threadValue =
             *it;
 
-        if (!threadValue.is<JsonObjectConst>())
+        if (!threadValue.is<JsonObject>())
         {
             printf(
                 "Thread entry %lu is not an object\n",
@@ -809,7 +809,7 @@ void loadModules(void)
     JsonVariantConst modulesValue =
         doc["Modules"];
 
-    if (!modulesValue.is<JsonArrayConst>())
+    if (!modulesValue.is<JsonArray>())
     {
         printf("Modules configuration is not an array\n");
         configError = true;
@@ -845,7 +845,7 @@ void loadModules(void)
         JsonVariantConst moduleValue =
             *it;
 
-        if (!moduleValue.is<JsonObjectConst>())
+        if (!moduleValue.is<JsonObject>())
         {
             printf(
                 "Module entry %lu is not an object\n",
