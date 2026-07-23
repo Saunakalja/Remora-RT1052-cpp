@@ -1,5 +1,6 @@
 
 #include "qdc.h"
+#include "modules/inputBitUpdate.h"
 
 #include <cstring>
 
@@ -692,7 +693,10 @@ void Qdc::update()
               capturedIndexCount;
           // The countdown is the exact number of Base intervals held high.
           this->pulseCount = this->indexPulse;
-          *(this->ptrData) |= this->mask;                 // set bit in data source high
+          updateInputBit(
+              *(this->ptrData),
+              this->mask,
+              true);                                      // set bit in data source high
       }
       else if (this->pulseCount > 1U)                     // maintain both index output and encoder count for the latch period
       {
@@ -701,7 +705,10 @@ void Qdc::update()
       else
       {
           this->pulseCount = 0U;
-          *(this->ptrData) &= ~this->mask;                // set bit in data source low
+          updateInputBit(
+              *(this->ptrData),
+              this->mask,
+              false);                                     // set bit in data source low
           *(this->ptrEncoderCount) = this->count;         // update encoder count
       }
   }

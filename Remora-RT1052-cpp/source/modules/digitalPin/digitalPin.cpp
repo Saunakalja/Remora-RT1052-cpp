@@ -1,4 +1,5 @@
 #include "digitalPin.h"
+#include "modules/inputBitUpdate.h"
 
 /***********************************************************************
                 MODULE CONFIGURATION AND CREATION FROM JSON     
@@ -105,14 +106,10 @@ void DigitalPin::update()
 			pinState = !pinState;
 		}
 
-		if (pinState == 1)								// input is high
-		{
-			*(this->ptrData) |= this->mask;
-		}
-		else											// input is low
-		{
-			*(this->ptrData) &= ~this->mask;
-		}
+		updateInputBit(
+			*(this->ptrData),
+			this->mask,
+			pinState);
 	}
 	else												// the pin is configured as an output
 	{

@@ -1,4 +1,5 @@
 #include "encoder.h"
+#include "modules/inputBitUpdate.h"
 
 #include <limits>
 
@@ -359,7 +360,10 @@ void Encoder::update()
             *(this->ptrEncoderCount) = this->indexCount;
             // The countdown is the exact number of Base intervals held high.
             this->pulseCount = this->indexPulse;
-            *(this->ptrData) |= this->mask;                 // set bit in data source high
+            updateInputBit(
+                *(this->ptrData),
+                this->mask,
+                true);                                      // set bit in data source high
         }
         else if (this->pulseCount > 1U)                     // maintain both index output and encoder count for the latch period
         {
@@ -368,7 +372,10 @@ void Encoder::update()
         else
         {
             this->pulseCount = 0U;
-            *(this->ptrData) &= ~this->mask;                // set bit in data source low
+            updateInputBit(
+                *(this->ptrData),
+                this->mask,
+                false);                                     // set bit in data source low
             *(this->ptrEncoderCount) =
                 encoderCountToInt32(
                     this->count);                           // update encoder count
