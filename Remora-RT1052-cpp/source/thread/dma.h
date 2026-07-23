@@ -15,6 +15,15 @@
 
 class DMA
 {
+	public:
+
+		enum class CompletionResult : uint8_t
+		{
+			None,
+			Buffer0,
+			Buffer1,
+			Fault
+		};
 
 	private:
 
@@ -25,12 +34,31 @@ class DMA
 		edma_config_t 			userConfig;
 		pit_config_t 			pitConfig;
 
-		uintptr_t 				tcd_0, tcd_1, tcd_next;
+		uintptr_t 				tcd_0, tcd_1;
 
-		static void EDMA_Callback(edma_handle_t *handle, void *param, bool transferDone, uint32_t tcds)
-		{
-			DMAtransferDone = true;
-		}
+		volatile uint8_t		pendingCompletionCount;
+		volatile uint8_t		pendingBuffer;
+		volatile uint8_t		expectedBuffer;
+		volatile uint8_t		completionFault;
+		volatile uint8_t		completionTracking;
+		volatile uint8_t		completionServiceActive;
+
+		static void EDMA_Callback(
+			edma_handle_t *handle,
+			void *param,
+			bool transferDone,
+			uint32_t tcds);
+
+		uint8_t decodeCompletedBuffer(
+			uintptr_t tcdNext,
+			bool transferDone) const;
+		void publishCompletion(
+			edma_handle_t *handle,
+			bool transferDone,
+			uint32_t tcds);
+		void latchCompletionFault(
+			edma_handle_t *handle);
+		void armCompletionTracking(void);
 
 	public:
 
@@ -38,10 +66,11 @@ class DMA
 		void configDMA(void);
 		void startDMA(void);
         void stopDMA(void);
-        void updateBuffers(void);
-		static bool takeTransferDone(void);
+        void updateBuffers(CompletionResult completedBuffer);
+		CompletionResult takeCompletion(void);
+		bool completeBufferService(void);
+		void clearCompletionState(void);
 
-		static volatile bool	DMAtransferDone;
 		edma_handle_t 			EDMA_Handle;
 };
 

@@ -5,9 +5,141 @@
 // DMA constructor
 DMA::DMA(DMA_Type* DMAn, uint32_t frequency):
 	DMAn(DMAn),
-	frequency(frequency)
+	frequency(frequency),
+	tcd_0(0),
+	tcd_1(0),
+	pendingCompletionCount(0),
+	pendingBuffer(0),
+	expectedBuffer(0),
+	completionFault(0),
+	completionTracking(0),
+	completionServiceActive(0)
 {
 
+}
+
+
+void DMA::EDMA_Callback(
+	edma_handle_t *handle,
+	void *param,
+	bool transferDone,
+	uint32_t tcds)
+{
+	DMA* const dma =
+		static_cast<DMA*>(param);
+
+	if (dma != nullptr)
+	{
+		dma->publishCompletion(
+			handle,
+			transferDone,
+			tcds);
+	}
+}
+
+
+uint8_t DMA::decodeCompletedBuffer(
+	uintptr_t tcdNext,
+	bool transferDone) const
+{
+	if (tcdNext == this->tcd_0)
+	{
+		return transferDone
+			? 1U
+			: 0U;
+	}
+
+	if (tcdNext == this->tcd_1)
+	{
+		return transferDone
+			? 0U
+			: 1U;
+	}
+
+	return UINT8_MAX;
+}
+
+
+void DMA::publishCompletion(
+	edma_handle_t *handle,
+	bool transferDone,
+	uint32_t tcds)
+{
+	static constexpr uint8_t invalidBuffer =
+		UINT8_MAX;
+
+	if ((this->completionTracking == 0U) ||
+		(this->completionFault != 0U))
+	{
+		return;
+	}
+
+	if ((tcds > 1U) ||
+		(this->pendingCompletionCount != 0U) ||
+		(this->completionServiceActive != 0U))
+	{
+		this->latchCompletionFault(
+			handle);
+		return;
+	}
+
+	const uintptr_t tcdNext =
+		static_cast<uintptr_t>(
+			EDMA_GetNextTCDAddress(
+				handle));
+
+	const uint8_t completedBuffer =
+		this->decodeCompletedBuffer(
+			tcdNext,
+			transferDone);
+
+	if ((completedBuffer == invalidBuffer) ||
+		(completedBuffer != this->expectedBuffer))
+	{
+		this->latchCompletionFault(
+			handle);
+		return;
+	}
+
+	this->pendingBuffer =
+		completedBuffer;
+
+	this->expectedBuffer =
+		(completedBuffer == 0U)
+			? 1U
+			: 0U;
+
+	__DMB();
+
+	this->pendingCompletionCount = 1U;
+}
+
+
+void DMA::latchCompletionFault(
+	edma_handle_t *handle)
+{
+	this->completionTracking = 0U;
+	this->pendingCompletionCount = 2U;
+
+	__DMB();
+
+	this->completionFault = 1U;
+
+	EDMA_StopTransfer(
+		handle);
+}
+
+
+void DMA::armCompletionTracking(void)
+{
+	this->pendingCompletionCount = 0U;
+	this->pendingBuffer = UINT8_MAX;
+	this->expectedBuffer = 0U;
+	this->completionFault = 0U;
+	this->completionTracking = 1U;
+	this->completionServiceActive = 0U;
+
+	__DMB();
 }
 
 
@@ -17,7 +149,7 @@ void DMA::configDMA(void)
 	memset(stepgenDMAbuffer_1, 0, sizeof(stepgenDMAbuffer_1));
 
 	stepgenDMAbuffer = false;
-	DMAtransferDone = false;
+	this->clearCompletionState();
 
 	// The Periodic Interrupt Timer (PIT) module
 	CLOCK_SetMux(kCLOCK_PerclkMux, 1U);
@@ -39,7 +171,7 @@ void DMA::configDMA(void)
 	EDMA_GetDefaultConfig(&this->userConfig);
 	EDMA_Init(this->DMAn, &this->userConfig);
 	EDMA_CreateHandle(&this->EDMA_Handle, this->DMAn, STPGEN_DMA_CHANNEL);
-	EDMA_SetCallback(&this->EDMA_Handle, this->EDMA_Callback, NULL);
+	EDMA_SetCallback(&this->EDMA_Handle, this->EDMA_Callback, this);
 	EDMA_ResetChannel(this->EDMA_Handle.base, this->EDMA_Handle.channel);
 
 	/* prepare descriptor 0 */
@@ -67,13 +199,24 @@ void DMA::configDMA(void)
 
 void DMA::startDMA(void)
 {
-	 EDMA_StartTransfer(&this->EDMA_Handle);
-	 printf("   Starting DMA Stepgen\n");
+	const uint32_t primask =
+		__get_PRIMASK();
+
+	__disable_irq();
+
+	this->armCompletionTracking();
+	EDMA_StartTransfer(&this->EDMA_Handle);
+
+	__set_PRIMASK(
+		primask);
+
+	printf("   Starting DMA Stepgen\n");
 }
 
 
 void DMA::stopDMA(void)
 {
+	 this->clearCompletionState();
 	 EDMA_AbortTransfer(&this->EDMA_Handle);
 	 EDMA_Deinit(this->DMAn);
 	 this->configDMA();
@@ -81,17 +224,15 @@ void DMA::stopDMA(void)
 }
 
 
-void DMA::updateBuffers(void)
+void DMA::updateBuffers(
+	CompletionResult completedBuffer)
 {
-	this->tcd_next =
-		static_cast<uintptr_t>(EDMA_GetNextTCDAddress(&this->EDMA_Handle));
-
-	if (this->tcd_next == this->tcd_0)
+	if (completedBuffer == CompletionResult::Buffer0)
 	{
 		stepgenDMAbuffer = false;
 		memset(stepgenDMAbuffer_0, 0, sizeof(stepgenDMAbuffer_0));
 	}
-	else if (this->tcd_next == this->tcd_1)
+	else if (completedBuffer == CompletionResult::Buffer1)
 	{
 		stepgenDMAbuffer = true;
 		memset(stepgenDMAbuffer_1, 0, sizeof(stepgenDMAbuffer_1));
@@ -99,19 +240,75 @@ void DMA::updateBuffers(void)
 }
 
 
-bool DMA::takeTransferDone(void)
+DMA::CompletionResult DMA::takeCompletion(void)
 {
 	const uint32_t primask =
 		__get_PRIMASK();
 
 	__disable_irq();
 
-	const bool transferDone =
-		DMAtransferDone;
+	CompletionResult result =
+		CompletionResult::None;
 
-	DMAtransferDone = false;
+	if (this->completionFault != 0U)
+	{
+		result =
+			CompletionResult::Fault;
+	}
+	else if (this->pendingCompletionCount == 1U)
+	{
+		result =
+			(this->pendingBuffer == 0U)
+				? CompletionResult::Buffer0
+				: CompletionResult::Buffer1;
 
-	__set_PRIMASK(primask);
+		this->pendingCompletionCount = 0U;
+		this->pendingBuffer = UINT8_MAX;
+		this->completionServiceActive = 1U;
+	}
 
-	return transferDone;
+	__set_PRIMASK(
+		primask);
+
+	return result;
+}
+
+
+bool DMA::completeBufferService(void)
+{
+	const uint32_t primask =
+		__get_PRIMASK();
+
+	__disable_irq();
+
+	this->completionServiceActive = 0U;
+
+	const bool faulted =
+		(this->completionFault != 0U);
+
+	__set_PRIMASK(
+		primask);
+
+	return faulted;
+}
+
+
+void DMA::clearCompletionState(void)
+{
+	const uint32_t primask =
+		__get_PRIMASK();
+
+	__disable_irq();
+
+	this->completionTracking = 0U;
+	this->pendingCompletionCount = 0U;
+	this->pendingBuffer = UINT8_MAX;
+	this->expectedBuffer = 0U;
+	this->completionFault = 0U;
+	this->completionServiceActive = 0U;
+
+	__DMB();
+
+	__set_PRIMASK(
+		primask);
 }

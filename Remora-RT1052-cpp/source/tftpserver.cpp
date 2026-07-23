@@ -712,6 +712,8 @@ static int IAP_tftp_process_write(struct udp_pcb *upcb, const ip_addr_t *to, int
 
   if (restoreDMA)
   {
+	  dmaThread->DMAptr->clearCompletionState();
+
 	  EDMA_StopTransfer(&edma_handle);
 	  EDMA_ResetChannel(edma_handle.base, edma_handle.channel);
 	  EDMA_Deinit(DMA0);
@@ -720,7 +722,6 @@ static int IAP_tftp_process_write(struct udp_pcb *upcb, const ip_addr_t *to, int
 	  DMAMUX_Deinit(DMAMUX);
 
 	  DMAthreadRunning = false;
-	  DMA::DMAtransferDone = false;
 
 	  // Apply the disabled state once after DMA has stopped.
 	  dmaThread->run();

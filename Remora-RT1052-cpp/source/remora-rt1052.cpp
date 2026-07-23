@@ -105,9 +105,6 @@ vector<Module*> vDMAthread;
 vector<Module*>::iterator iterDMA;
 bool DMAstepgen = false;
 bool stepgenDMAbuffer = false;					// indicates which double buffer to use 0 or 1
-//volatile bool DMAtransferDone = false;
-
-volatile bool DMA::DMAtransferDone = false;
 
 //edma_handle_t stepgen_EDMA_Handle;
 
@@ -2284,8 +2281,10 @@ int main(void)
                                       dmaThread->stopThread();
                                       DMAthreadRunning = false;
                                   }
-
-                                  DMA::DMAtransferDone = false;
+                                  else
+                                  {
+                                      dmaThread->DMAptr->clearCompletionState();
+                                  }
 
                                   // Apply the disabled state after DMA has stopped.
                                   dmaThread->run();
@@ -2302,10 +2301,50 @@ int main(void)
 
         EthernetTasks();
 
-	if (DMA::takeTransferDone())
+	DMA::CompletionResult dmaCompletion =
+		dmaThread->DMAptr->takeCompletion();
+
+	bool dmaCompletionFault =
+		(dmaCompletion == DMA::CompletionResult::Fault);
+
+	if ((dmaCompletion == DMA::CompletionResult::Buffer0) ||
+		(dmaCompletion == DMA::CompletionResult::Buffer1))
 	{
-		dmaThread->DMAptr->updateBuffers();
+		dmaThread->DMAptr->updateBuffers(
+			dmaCompletion);
 		dmaThread->run();
+
+		dmaCompletionFault =
+			dmaThread->DMAptr->completeBufferService();
+	}
+
+	if (dmaCompletionFault)
+	{
+		printf(
+			"DMA completion overrun. Stopping DMA Stepgen.\n");
+
+		if (DMAthreadRunning)
+		{
+			dmaThread->stopThread();
+			DMAthreadRunning = false;
+		}
+		else
+		{
+			dmaThread->DMAptr->clearCompletionState();
+		}
+
+		int remaining =
+			sizeof(rxData.rxBuffer);
+
+		while (remaining-- > 0)
+		{
+			rxData.rxBuffer[remaining] = 0;
+		}
+
+		// Apply the disabled state after DMA has stopped.
+		dmaThread->run();
+
+		currentState = ST_RESET;
 	}
 
         if (newJson)
