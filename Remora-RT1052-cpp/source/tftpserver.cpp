@@ -421,6 +421,7 @@ static void IAP_tftp_abort_transfer(
 static void IAP_wrq_recv_callback(void *_args, struct udp_pcb *upcb, struct pbuf *pkt_buf, const ip_addr_t *addr, u16_t port)
 {
   tftp_connection_args *args = (tftp_connection_args *)_args;
+  bool expectedBlockAccepted = false;
 
   if (pkt_buf == nullptr)
   {
@@ -521,6 +522,7 @@ static void IAP_wrq_recv_callback(void *_args, struct udp_pcb *upcb, struct pbuf
     args->block++;
     /* update total bytes  */
     (args->tot_bytes) += payloadSize;
+    expectedBlockAccepted = true;
 
     /* This is a valid pkt but it has no data.  This would occur if the file being
        written is an exact multiple of 512 bytes.  In this case, the args->block
@@ -530,6 +532,7 @@ static void IAP_wrq_recv_callback(void *_args, struct udp_pcb *upcb, struct pbuf
   {
     /* update our block number to match the block number just received  */
     args->block++;
+    expectedBlockAccepted = true;
   }
 
   /* Send the appropriate ACK pkt*/
@@ -543,6 +546,7 @@ static void IAP_wrq_recv_callback(void *_args, struct udp_pcb *upcb, struct pbuf
   if (ackStatus != ERR_OK)
   {
     PRINTF("TFTP DATA ACK failure !\r\n");
+    expectedBlockAccepted = false;
 
     IAP_tftp_abort_transfer(
         upcb,
@@ -556,7 +560,8 @@ static void IAP_wrq_recv_callback(void *_args, struct udp_pcb *upcb, struct pbuf
    * then we've received the whole file and so we can quit (this is how TFTP
    * signals the EndTransferof a transfer!)
    */
-  if (pkt_buf->len < TFTP_DATA_PKT_LEN_MAX)
+  if (expectedBlockAccepted &&
+      (pkt_buf->len < TFTP_DATA_PKT_LEN_MAX))
   {
     IAP_tftp_cleanup_wr(upcb, args);
     pbuf_free(pkt_buf);
