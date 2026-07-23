@@ -15,13 +15,32 @@ portInterrupt::portInterrupt(Qdc* owner):InterruptOwnerPtr(owner)
         kGPIO_IntRisingEdge,
     };
 
+    const uint32_t indexPinMask =
+        uint32_t{1} <<
+        this->InterruptOwnerPtr->indexPinInNumber;
+
+    GPIO_PortDisableInterrupts(
+        this->InterruptOwnerPtr->gpioBase,
+        indexPinMask);
+
+    GPIO_PinInit(
+        this->InterruptOwnerPtr->gpioBase,
+        this->InterruptOwnerPtr->indexPinInNumber,
+        &pin_config);
+
+    GPIO_PortClearInterruptFlags(
+        this->InterruptOwnerPtr->gpioBase,
+        indexPinMask);
+
 	// When a device interrupt object is instantiated, the Register function must be called to let the
 	// Interrupt base class know that there is an appropriate ISR function for the given interrupt.
     this->Register(this->InterruptOwnerPtr->irq,this);
-	EnableIRQ(this->InterruptOwnerPtr->irq);
 
-	GPIO_PinInit(this->InterruptOwnerPtr->gpioBase, this->InterruptOwnerPtr->indexPinInNumber, &pin_config);
-    GPIO_PortEnableInterrupts(this->InterruptOwnerPtr->gpioBase, uint32_t{1} << this->InterruptOwnerPtr->indexPinInNumber);
+    GPIO_PortEnableInterrupts(
+        this->InterruptOwnerPtr->gpioBase,
+        indexPinMask);
+
+	EnableIRQ(this->InterruptOwnerPtr->irq);
 }
 
 void portInterrupt::Register(IRQn_Type irq,portInterrupt* intThisPtr)

@@ -549,6 +549,8 @@ bool createQdc()
             return false;
         }
 
+        NVIC_SetPriority(IndexIrqGpioPinId, 4);
+
         printf("  Quadrature Encoder has index at pin %s\n", pinI);
         qdcModule =
             new Qdc(
@@ -563,7 +565,6 @@ bool createQdc()
                     dataBit),
                 filt_per,
                 filt_cnt);
-        NVIC_SetPriority(IndexIrqGpioPinId , 4);
     }
 
     ptrProcessVariable[pv]  = &txData.processVariable[pv];
@@ -610,13 +611,11 @@ Qdc::Qdc(volatile float &ptrEncoderCount, volatile uint32_t &ptrData, ENC_Type* 
 	irq(irq),
 	indexPortNumber(indexPortNumber),
 	indexPinInNumber(indexPinInNumber),
+    interruptPtr(nullptr),
     bitNumber(bitNumber),
 	filt_per(filt_per),
 	filt_cnt(filt_cnt)
 {
-
-    interruptPtr = new portInterrupt(this);
-
     enc_config_t mEncConfigStruct;
     /* Initialize the ENC module. */
     ENC_GetDefaultConfig(&mEncConfigStruct);
@@ -657,6 +656,9 @@ Qdc::Qdc(volatile float &ptrEncoderCount, volatile uint32_t &ptrData, ENC_Type* 
     this->mask =
         uint32_t{1} << this->bitNumber;
     this->indexDetected = false;
+
+    this->interruptPtr =
+        new portInterrupt(this);
 }
 
 void Qdc::update()
