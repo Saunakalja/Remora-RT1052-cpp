@@ -2243,11 +2243,19 @@ int main(void)
      		                  }
      		              }
 
-     		              if (DMAthreadRunning)
-     		              {
-     		            	 dmaThread->stopThread();
-     		            	 DMAthreadRunning = false;
-     		              }
+                              if (hasDMAthread)
+                              {
+                                  if (DMAthreadRunning)
+                                  {
+                                      dmaThread->stopThread();
+                                      DMAthreadRunning = false;
+                                  }
+
+                                  DMA::DMAtransferDone = false;
+
+                                  // Apply the disabled state after DMA has stopped.
+                                  dmaThread->run();
+                              }
 
      		              currentState = ST_IDLE;
      		              break;

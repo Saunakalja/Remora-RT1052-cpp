@@ -159,6 +159,7 @@ RTAPI_MP_INT(PRU_base_freq, "PRU base thread frequency");
 
 static int udpSocket = -1;
 static int errCount;
+static bool enableWasActive = false;
 struct sockaddr_in dstAddr, srcAddr;
 struct hostent *server;
 static const char *dstAddress = "10.10.10.10";
@@ -842,6 +843,10 @@ void pru_read()
 void pru_write()
 {
 	int i, ret;
+	bool enableActive = *(data->enable);
+	bool sendSafeStop = enableWasActive && !enableActive;
+
+	enableWasActive = enableActive;
 
 	// Data header
 	txData.header = PRU_WRITE;
@@ -883,7 +888,17 @@ void pru_write()
 		}
 	}
 
-	if( *(data->status) )
+	if (sendSafeStop)
+	{
+		memset(
+			txData.txBuffer,
+			0,
+			sizeof(txData.txBuffer));
+
+		txData.header = PRU_WRITE;
+	}
+
+	if (*(data->status) || sendSafeStop)
 	{
 		// Transfer to and from the PRU
 		pru_transfer(BUFFER_SIZE, sizeof(rxData.header));
