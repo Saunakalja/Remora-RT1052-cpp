@@ -245,10 +245,28 @@
 /**
  * MEM_LIBC_MALLOC==1: Use malloc/free/realloc provided by your C-library
  * instead of the lwip internal allocator. Can save code size if you
- * already use it.
+ * already use it. Specialized case of MEM_CUSTOM_ALLOCATOR.
+ * @see MEM_CUSTOM_ALLOCATOR
  */
 #if !defined MEM_LIBC_MALLOC || defined __DOXYGEN__
 #define MEM_LIBC_MALLOC                 0
+#elif MEM_LIBC_MALLOC
+#define MEM_CUSTOM_ALLOCATOR            1
+#define MEM_CUSTOM_FREE                 free
+#define MEM_CUSTOM_MALLOC               malloc
+#define MEM_CUSTOM_CALLOC               calloc
+#endif
+
+/**
+ * MEM_CUSTOM_ALLOCATOR==1: Use malloc/free/realloc provided by a custom
+ * implementation instead of the lwip internal allocator. Can save code size if
+ * you already use it. If enabled, you have to define those functions:
+ *  \#define MEM_CUSTOM_FREE   my_free
+ *  \#define MEM_CUSTOM_MALLOC my_malloc
+ *  \#define MEM_CUSTOM_CALLOC my_calloc
+ */
+#if !defined MEM_CUSTOM_ALLOCATOR || defined __DOXYGEN__
+#define MEM_CUSTOM_ALLOCATOR            0
 #endif
 
 /**
@@ -671,12 +689,14 @@
 #endif
 
 /**
- * LWIP_VLAN_PCP==1: Enable outgoing VLAN taggning of frames on a per-PCB basis
- * for QoS purposes. With this feature enabled, each PCB has a new variable: "tci".
- * (Tag Control Identifier). The TCI contains three fields: VID, CFI and PCP.
- * VID is the VLAN ID, which should be set to zero.
- * The "CFI" bit is used to enable or disable VLAN tags for the PCB.
- * PCP (Priority Code Point) is a 3 bit field used for Ethernet level QoS.
+ * LWIP_VLAN_PCP==1: Enable outgoing VLAN tagging of frames on a per-PCB basis
+ * for QoS purposes. With this feature enabled, each PCB has a new variable:
+ * "netif_hints.tci" (Tag Control Identifier).
+ * The TCI contains three fields: VID, CFI and PCP.
+ * - VID is the VLAN ID, which should be set to zero.
+ * - The "CFI" bit is used to enable or disable VLAN tags for the PCB.
+ * - PCP (Priority Code Point) is a 3 bit field used for Ethernet level QoS.
+ * See pcb_tci_*() functions to get/set/clear this.
  */
 #ifndef LWIP_VLAN_PCP
 #define LWIP_VLAN_PCP                   0
@@ -932,8 +952,7 @@
  * LWIP_DHCP_DOES_ACD_CHECK==1: Perform address conflict detection on the dhcp address.
  */
 #if !defined LWIP_DHCP_DOES_ACD_CHECK || defined __DOXYGEN__
-/* NXP changed default to 0 even if DHCP is on */
-#define LWIP_DHCP_DOES_ACD_CHECK        0
+#define LWIP_DHCP_DOES_ACD_CHECK        LWIP_DHCP
 #endif
 
 /**
@@ -967,6 +986,14 @@
 #if !defined LWIP_DHCP_MAX_DNS_SERVERS || defined __DOXYGEN__
 #define LWIP_DHCP_MAX_DNS_SERVERS       DNS_MAX_SERVERS
 #endif
+
+/** LWIP_DHCP_DISCOVER_ADD_HOSTNAME: Set to 0 to not include hostname opt in discover packets.
+ * If the hostname is not set in the DISCOVER packet, then some servers might issue an OFFER with hostname
+ * configured and consequently reject the REQUEST with any other hostname.
+ */
+#if !defined LWIP_DHCP_DISCOVER_ADD_HOSTNAME || defined __DOXYGEN__
+#define LWIP_DHCP_DISCOVER_ADD_HOSTNAME 1
+#endif /* LWIP_DHCP_DISCOVER_ADD_HOSTNAME */
 /**
  * @}
  */
@@ -1338,6 +1365,15 @@
 #define TCP_CALCULATE_EFF_SEND_MSS      1
 #endif
 
+/**
+ * LWIP_TCP_RTO_TIME: Initial TCP retransmission timeout (ms).
+ * This defaults to 3 seconds as traditionally defined in the TCP protocol.
+ * For improving timely recovery on faster networks, this value could
+ * be lowered down to 1 second (RFC 6298)
+ */
+#if !defined LWIP_TCP_RTO_TIME || defined __DOXYGEN__
+#define LWIP_TCP_RTO_TIME               3000
+#endif
 
 /**
  * TCP_SND_BUF: TCP sender buffer space (bytes).
@@ -1592,10 +1628,22 @@
 /**
  * LWIP_PBUF_CUSTOM_DATA: Store private data on pbufs (e.g. timestamps)
  * This extends struct pbuf so user can store custom data on every pbuf.
+ * e.g.:
+ *  \#define LWIP_PBUF_CUSTOM_DATA   u32_t myref;
  */
 #if !defined LWIP_PBUF_CUSTOM_DATA || defined __DOXYGEN__
 #define LWIP_PBUF_CUSTOM_DATA
 #endif
+
+/**
+ * LWIP_PBUF_CUSTOM_DATA_INIT: Initialize private data on pbufs.
+ * e.g. for the above example definition:
+ *  \#define LWIP_PBUF_CUSTOM_DATA(p) (p)->myref = 0
+ */
+#if !defined LWIP_PBUF_CUSTOM_DATA_INIT || defined __DOXYGEN__
+#define LWIP_PBUF_CUSTOM_DATA_INIT(p)
+#endif
+
 /**
  * @}
  */
@@ -2047,16 +2095,6 @@
 #endif
 
 /**
- * LWIP_TCP_USER_TIMEOUT==1: Enable socket send timeout.
- * It specifies the maximum amount of time in milliseconds 
- * that transmitted data may remain unacknowledged before 
- * TCP will forcibly close.
- */
-#if !defined LWIP_TCP_USER_TIMEOUT || defined __DOXYGEN__
-#define LWIP_TCP_USER_TIMEOUT           0
-#endif
-
-/**
  * LWIP_SO_SNDRCVTIMEO_NONSTANDARD==1: SO_RCVTIMEO/SO_SNDTIMEO take an int
  * (milliseconds, much like winsock does) instead of a struct timeval (default).
  */
@@ -2071,14 +2109,6 @@
 #define LWIP_SO_RCVBUF                  0
 #endif
 
-/**
- * LWIP_SIOCOUTQ==1: Enable LWIP_SIOCOUTQ reading.
- * It returns count of (not sent + not acked) data bytes in send buffer.
- */
-#if !defined LWIP_SIOCOUTQ || defined __DOXYGEN__
-#define LWIP_SIOCOUTQ                  0
-#endif
-     
 /**
  * LWIP_SO_LINGER==1: Enable SO_LINGER processing.
  */
@@ -2238,7 +2268,7 @@
  * MEM_STATS==1: Enable mem.c stats.
  */
 #if !defined MEM_STATS || defined __DOXYGEN__
-#define MEM_STATS                       ((MEM_LIBC_MALLOC == 0) && (MEM_USE_POOLS == 0))
+#define MEM_STATS                       ((MEM_CUSTOM_ALLOCATOR == 0) && (MEM_USE_POOLS == 0))
 #endif
 
 /**

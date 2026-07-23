@@ -196,8 +196,11 @@ PACK_STRUCT_END
 #if (LWIP_ALTCP && LWIP_EVENT_API)
 #error "The application layered tcp API does not work with LWIP_EVENT_API"
 #endif
-#if (MEM_LIBC_MALLOC && MEM_USE_POOLS)
-#error "MEM_LIBC_MALLOC and MEM_USE_POOLS may not both be simultaneously enabled in your lwipopts.h"
+#if (MEM_CUSTOM_ALLOCATOR && !(defined(MEM_CUSTOM_FREE) && defined(MEM_CUSTOM_MALLOC) && defined(MEM_CUSTOM_CALLOC)))
+#error "All of MEM_CUSTOM_FREE/MEM_CUSTOM_MALLOC/MEM_CUSTOM_CALLOC must be provided if MEM_CUSTOM_ALLOCATOR is enabled in your lwipopts.h"
+#endif
+#if (MEM_USE_POOLS && MEM_CUSTOM_ALLOCATOR)
+#error "MEM_USE_POOLS may not be used with a custom allocator (MEM_CUSTOM_ALLOCATOR or MEM_LIBC_MALLOC) enabled in your lwipopts.h"
 #endif
 #if (MEM_USE_POOLS && !MEMP_USE_CUSTOM_POOLS)
 #error "MEM_USE_POOLS requires custom pools (MEMP_USE_CUSTOM_POOLS) to be enabled in your lwipopts.h"
@@ -321,10 +324,8 @@ PACK_STRUCT_END
 #if !MEMP_MEM_MALLOC && PBUF_POOL_SIZE && (PBUF_POOL_BUFSIZE <= (PBUF_LINK_ENCAPSULATION_HLEN + PBUF_LINK_HLEN + PBUF_IP_HLEN + PBUF_TRANSPORT_HLEN))
 #error "lwip_sanity_check: WARNING: PBUF_POOL_BUFSIZE does not provide enough space for protocol headers. If you know what you are doing, define LWIP_DISABLE_TCP_SANITY_CHECKS to 1 to disable this error."
 #endif
-#if !defined(LWIP_DISABLE_PBUF_POOL_SIZE_SANITY_CHECKS) || !LWIP_DISABLE_PBUF_POOL_SIZE_SANITY_CHECKS
 #if !MEMP_MEM_MALLOC && PBUF_POOL_SIZE && (TCP_WND > (PBUF_POOL_SIZE * (PBUF_POOL_BUFSIZE - (PBUF_LINK_ENCAPSULATION_HLEN + PBUF_LINK_HLEN + PBUF_IP_HLEN + PBUF_TRANSPORT_HLEN))))
 #error "lwip_sanity_check: WARNING: TCP_WND is larger than space provided by PBUF_POOL_SIZE * (PBUF_POOL_BUFSIZE - protocol headers). If you know what you are doing, define LWIP_DISABLE_TCP_SANITY_CHECKS to 1 to disable this error."
-#endif
 #endif
 #if TCP_WND < TCP_MSS
 #error "lwip_sanity_check: WARNING: TCP_WND is smaller than MSS. If you know what you are doing, define LWIP_DISABLE_TCP_SANITY_CHECKS to 1 to disable this error."
@@ -342,9 +343,7 @@ lwip_init(void)
 {
 #ifndef LWIP_SKIP_CONST_CHECK
   int a = 0;
-#ifdef LWIP_NOASSERT /* Caused compiler warning. */
   LWIP_UNUSED_ARG(a);
-#endif
   LWIP_ASSERT("LWIP_CONST_CAST not implemented correctly. Check your lwIP port.", LWIP_CONST_CAST(void *, &a) == &a);
 #endif
 #ifndef LWIP_SKIP_PACKING_CHECK

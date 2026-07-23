@@ -989,13 +989,7 @@ netif_found:
       /* check payload length is multiple of 8 octets when mbit is set */
       if (IP6_FRAG_MBIT(frag_hdr) && (IP6H_PLEN(ip6hdr) & 0x7)) {
         /* ipv6 payload length is not multiple of 8 octets */
-        #ifdef __IAR_SYSTEMS_ICC__
-        #pragma diag_suppress=Pa039
-        #endif /* __IAR_SYSTEMS_ICC__ */
         icmp6_param_problem(p, ICMP6_PP_FIELD, LWIP_PACKED_CAST(const void *, &ip6hdr->_plen));
-        #ifdef __IAR_SYSTEMS_ICC__
-        #pragma diag_default=Pa039
-        #endif /* __IAR_SYSTEMS_ICC__ */
         LWIP_DEBUGF(IP6_DEBUG, ("ip6_input: packet with invalid payload length dropped\n"));
         pbuf_free(p);
         IP6_STATS_INC(ip6.drop);
@@ -1017,9 +1011,10 @@ netif_found:
           goto ip6_input_cleanup;
         }
 
-        /* Returned p point to IPv6 header.
+        /* Returned p points to IPv6 header.
          * Update all our variables and pointers and continue. */
         ip6hdr = (struct ip6_hdr *)p->payload;
+        ip_data.current_ip6_header = ip6hdr;
         nexth = &IP6H_NEXTH(ip6hdr);
         hlen = hlen_tot = IP6_HLEN;
         pbuf_remove_header(p, IP6_HLEN);

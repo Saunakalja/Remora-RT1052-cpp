@@ -156,7 +156,7 @@ static const char *const tcp_state_str[] = {
 };
 
 /* last local TCP port */
-static volatile u16_t tcp_port = TCP_LOCAL_PORT_RANGE_START;
+static u16_t tcp_port = TCP_LOCAL_PORT_RANGE_START;
 
 /* Incremented every coarse grained timer shot (typically every 500 ms). */
 u32_t tcp_ticks;
@@ -1350,16 +1350,6 @@ tcp_slowtmr_start:
         }
       }
     }
-    
-#if LWIP_TCP_USER_TIMEOUT  
-    /* When user timeout is set and timeout occured, abort connection */
-    if(pcb->user_timeout && pcb->rtime > 0 && pcb->rtime >= pcb->user_timeout)
-    {
-        /* Abort connection */
-        ++pcb_remove;
-        ++pcb_reset;
-    }
-#endif
 
     /* If this PCB has queued out of sequence data, but has been
        inactive for too long, will drop the data (it will eventually
@@ -1689,23 +1679,6 @@ tcp_seg_copy(struct tcp_seg *seg)
 }
 #endif /* TCP_QUEUE_OOSEQ */
 
-#if LWIP_SIOCOUTQ
-int
-tcp_seg_get_unacked_count(struct tcp_pcb *pcb)
-{
-  int unacked = 0;
-  
-  LWIP_ERROR("tcp_recv_null: invalid pcb", pcb != NULL, return ERR_ARG);
-  
-  if(pcb->unacked)
-    unacked += pcb->unacked->len;
-  if(pcb->unsent)
-    unacked += pcb->unsent->len;
-  
-  return unacked;
-}
-#endif /* LWIP_SIOCOUTQ */
-
 #if LWIP_CALLBACK_API
 /**
  * Default receive callback that is called if the user didn't register
@@ -1928,8 +1901,10 @@ tcp_alloc(u8_t prio)
     /* As initial send MSS, we use TCP_MSS but limit it to 536.
        The send MSS is updated when an MSS option is received. */
     pcb->mss = INITIAL_MSS;
-    pcb->rto = 3000 / TCP_SLOW_INTERVAL;
-    pcb->sv = 3000 / TCP_SLOW_INTERVAL;
+    /* Set initial TCP's retransmission timeout to 3000 ms by default.
+       This value could be configured in lwipopts */
+    pcb->rto = LWIP_TCP_RTO_TIME / TCP_SLOW_INTERVAL;
+    pcb->sv = LWIP_TCP_RTO_TIME / TCP_SLOW_INTERVAL;
     pcb->rtime = -1;
     pcb->cwnd = 1;
     pcb->tmr = tcp_ticks;
@@ -1954,9 +1929,7 @@ tcp_alloc(u8_t prio)
     pcb->keep_intvl = TCP_KEEPINTVL_DEFAULT;
     pcb->keep_cnt   = TCP_KEEPCNT_DEFAULT;
 #endif /* LWIP_TCP_KEEPALIVE */
-#if LWIP_TCP_USER_TIMEOUT  
-    pcb->user_timeout = TCP_USER_TIMEOUT_DEFAULT;
-#endif /* LWIP_TCP_USER_TIMEOUT */
+    pcb_tci_init(pcb);
   }
   return pcb;
 }
