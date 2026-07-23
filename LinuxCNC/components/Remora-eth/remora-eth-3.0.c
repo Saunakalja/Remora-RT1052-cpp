@@ -27,6 +27,7 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <string.h>
+#include <limits.h>
 
 #include <math.h>
 #include <sys/socket.h>
@@ -155,12 +156,14 @@ RTAPI_MP_INT(PRU_base_freq, "PRU base thread frequency");
 #define SEND_TIMEOUT_US 10
 #define RECV_TIMEOUT_US 10
 #define READ_PCK_DELAY_NS 10000
-#define TRANSFER_TIMEOUT_NS 500000LL
+#define COMMUNICATION_CYCLE_BUDGET_NS 500000LL
 
 static int udpSocket = -1;
 static uint8_t readErrCount;
 static uint8_t writeErrCount;
 static bool enableWasActive = false;
+static long long communicationCycleDeadline;
+static bool communicationCycleDeadlineActive;
 struct sockaddr_in dstAddr, srcAddr;
 struct hostent *server;
 static const char *dstAddress = "10.10.10.10";
@@ -175,7 +178,12 @@ static void UDP_close(void);
 static void update_freq(void *arg, long period);
 static void pru_write();
 static void pru_read();
-static void pru_transfer(int txSize, int rxSize, uint8_t *errorCount);
+static long long create_communication_cycle_deadline(void);
+static void pru_transfer(
+	int txSize,
+	int rxSize,
+	uint8_t *errorCount,
+	long long responseDeadline);
 static CONTROL parse_ctrl_type(const char *ctrl);
 
 
@@ -743,10 +751,29 @@ void update_freq(void *arg, long period)
 }
 
 
+static long long create_communication_cycle_deadline(void)
+{
+	long long currentTime = rtapi_get_time();
+
+	if (currentTime > (LLONG_MAX - COMMUNICATION_CYCLE_BUDGET_NS))
+	{
+		return LLONG_MAX;
+	}
+
+	return currentTime + COMMUNICATION_CYCLE_BUDGET_NS;
+}
+
+
 void pru_read()
 {
 	int i, ret;
 	double curr_pos;
+	long long responseDeadline;
+
+	communicationCycleDeadline =
+		create_communication_cycle_deadline();
+	communicationCycleDeadlineActive = true;
+	responseDeadline = communicationCycleDeadline;
 
 	// Data header
 	txData.header = PRU_READ;
@@ -761,7 +788,8 @@ void pru_read()
 			pru_transfer(
 				sizeof(txData.header),
 				BUFFER_SIZE,
-				&readErrCount);
+				&readErrCount,
+				responseDeadline);
 			
 			switch (rxData.header)		// only process valid SPI payloads. This rejects bad payloads
 			{
@@ -849,6 +877,16 @@ void pru_write()
 	int i, ret;
 	bool enableActive = *(data->enable);
 	bool sendSafeStop = enableWasActive && !enableActive;
+	long long responseDeadline;
+
+	if (!communicationCycleDeadlineActive)
+	{
+		communicationCycleDeadline =
+			create_communication_cycle_deadline();
+		communicationCycleDeadlineActive = true;
+	}
+
+	responseDeadline = communicationCycleDeadline;
 
 	enableWasActive = enableActive;
 
@@ -908,7 +946,8 @@ void pru_write()
 		pru_transfer(
 			BUFFER_SIZE,
 			sizeof(rxData.header),
-			&writeErrCount);
+			&writeErrCount,
+			responseDeadline);
 		
 		switch (rxData.header)
 		{
@@ -938,13 +977,19 @@ void pru_write()
 				break;
 		}	
 	}
+
+	communicationCycleDeadlineActive = false;
 }
 
 
-void pru_transfer(int txSize, int rxSize, uint8_t *errorCount)
+void pru_transfer(
+	int txSize,
+	int rxSize,
+	uint8_t *errorCount,
+	long long responseDeadline)
 {
 	int ret;
-	long long t1, t2;
+	long long currentTime;
 	uint8_t receiveBuffer[BUFFER_SIZE];
 	bool validResponse = false;
 	int32_t expectedHeader = PRU_ERR;
@@ -966,9 +1011,9 @@ void pru_transfer(int txSize, int rxSize, uint8_t *errorCount)
 	if (ret == txSize)
 	{
 		// Receive incoming datagram
-	    t1 = rtapi_get_time();
-	    t2 = t1;
-	    do {
+	    currentTime = rtapi_get_time();
+	    while (!validResponse && (currentTime < responseDeadline))
+	    {
 	        ret = recv(udpSocket, receiveBuffer, rxSize, MSG_TRUNC);
 	        if (ret == rxSize)
 	        {
@@ -991,8 +1036,8 @@ void pru_transfer(int txSize, int rxSize, uint8_t *errorCount)
 		        }
 	        }
 	        if(ret < 0) rtapi_delay(READ_PCK_DELAY_NS);
-	        t2 = rtapi_get_time();
-	    } while (!validResponse && ((t2 - t1) < TRANSFER_TIMEOUT_NS));
+	        currentTime = rtapi_get_time();
+	    }
 	}
 	else
 	{
