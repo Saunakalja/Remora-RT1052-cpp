@@ -69,10 +69,9 @@
 #endif
 #endif
 
-/*  Defines Ethernet Autonegotiation Timeout during initialization.
- *  Set it to 0 to disable the waiting. */
-#ifndef ENET_ATONEGOTIATION_TIMEOUT
-#define ENET_ATONEGOTIATION_TIMEOUT (0x2FFFFU)
+/* Physical link polling interval for bare-metal timeout servicing. */
+#ifndef ETH_LINK_POLLING_INTERVAL_MS
+#define ETH_LINK_POLLING_INTERVAL_MS (1500U)
 #endif
 
 /* Define those to better describe your network interface. */

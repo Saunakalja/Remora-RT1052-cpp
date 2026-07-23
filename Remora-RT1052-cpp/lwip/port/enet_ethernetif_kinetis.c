@@ -156,6 +156,12 @@ typedef struct rx_pbuf_wrapper
 struct ethernetif
 {
     ENET_Type *base;
+    phy_handle_t *phyHandle;
+    bool phyInitialized;
+    bool lastLinkUp;
+    bool linkModeValid;
+    phy_speed_t lastSpeed;
+    phy_duplex_t lastDuplex;
 #if (defined(FSL_FEATURE_SOC_ENET_COUNT) && (FSL_FEATURE_SOC_ENET_COUNT > 0)) || (USE_RTOS && defined(SDK_OS_FREE_RTOS))
     enet_handle_t handle;
 #endif
@@ -364,16 +370,22 @@ static void ethernetif_rx_free(ENET_Type *base, void *buffer, void *userData, ui
 /**
  * Initializes ENET driver.
  */
-void ethernetif_enet_init(struct netif *netif,
-                          struct ethernetif *ethernetif,
-                          const ethernetif_config_t *ethernetifConfig)
+err_t ethernetif_enet_init(struct netif *netif,
+                           struct ethernetif *ethernetif,
+                           const ethernetif_config_t *ethernetifConfig)
 {
     enet_config_t config;
     uint32_t sysClock;
     enet_buffer_config_t buffCfg[ENET_RING_NUM];
-    phy_speed_t speed;
-    phy_duplex_t duplex;
+    status_t status;
     int i;
+
+    ethernetif->phyHandle      = ethernetifConfig->phyHandle;
+    ethernetif->phyInitialized = false;
+    ethernetif->lastLinkUp     = false;
+    ethernetif->linkModeValid  = false;
+    ethernetif->lastSpeed      = kPHY_Speed100M;
+    ethernetif->lastDuplex     = kPHY_FullDuplex;
 
     /* prepare the buffer configuration. */
     buffCfg[0].rxBdNumber      = ENET_RXBD_NUM;       /* Receive buffer descriptor number. */
@@ -403,9 +415,15 @@ void ethernetif_enet_init(struct netif *netif,
     BOARD_ENETFlexibleConfigure(&config);
 #endif
 
-    ethernetif_phy_init(ethernetif, ethernetifConfig, &speed, &duplex);
-    config.miiSpeed  = (enet_mii_speed_t)speed;
-    config.miiDuplex = (enet_mii_duplex_t)duplex;
+    status = ethernetif_phy_init(ethernetif, ethernetif->phyHandle);
+    if (status == kStatus_Success)
+    {
+        ethernetif->phyInitialized = true;
+    }
+    else
+    {
+        LWIP_PLATFORM_DIAG(("PHY initialization failed; periodic retry enabled.\r\n"));
+    }
 
 #if USE_RTOS && defined(SDK_OS_FREE_RTOS)
     uint32_t instance;
@@ -459,14 +477,94 @@ void ethernetif_enet_init(struct netif *netif,
     }
 
     /* Initialize the ENET module. */
-    ENET_Init(ethernetif->base, &ethernetif->handle, &config, &buffCfg[0], netif->hwaddr, sysClock);
+    status = ENET_Init(ethernetif->base, &ethernetif->handle, &config, &buffCfg[0], netif->hwaddr, sysClock);
+    if (status != kStatus_Success)
+    {
+        LWIP_PLATFORM_DIAG(("ENET initialization failed.\r\n"));
+
+        if (status == kStatus_ENET_InitMemoryFail)
+        {
+            return ERR_MEM;
+        }
+
+        return ERR_IF;
+    }
 
     ENET_ActiveRead(ethernetif->base);
+
+    return ERR_OK;
 }
 
 void **ethernetif_enet_ptr(struct ethernetif *ethernetif)
 {
     return (void **)&(ethernetif->base);
+}
+
+phy_handle_t *ethernetif_get_phy(struct netif *netif)
+{
+    struct ethernetif *ethernetif = netif->state;
+
+    return ethernetif->phyHandle;
+}
+
+bool ethernetif_is_phy_initialized(struct netif *netif)
+{
+    struct ethernetif *ethernetif = netif->state;
+
+    return ethernetif->phyInitialized;
+}
+
+void ethernetif_set_phy_initialized(struct netif *netif, bool initialized)
+{
+    struct ethernetif *ethernetif = netif->state;
+
+    ethernetif->phyInitialized = initialized;
+}
+
+bool ethernetif_is_link_up(struct netif *netif)
+{
+    struct ethernetif *ethernetif = netif->state;
+
+    return ethernetif->lastLinkUp;
+}
+
+void ethernetif_on_link_up(struct netif *netif, phy_speed_t speed, phy_duplex_t duplex)
+{
+    struct ethernetif *ethernetif = netif->state;
+    const bool modeChanged = !ethernetif->linkModeValid || (speed != ethernetif->lastSpeed) ||
+                             (duplex != ethernetif->lastDuplex);
+
+    if (!ethernetif->lastLinkUp || modeChanged)
+    {
+        ENET_SetMII(ethernetif->base, (enet_mii_speed_t)speed, (enet_mii_duplex_t)duplex);
+
+        if (ethernetif->lastLinkUp)
+        {
+            LWIP_PLATFORM_DIAG(("Ethernet link mode changed: %u Mbps, %s duplex.\r\n",
+                                (speed == kPHY_Speed100M) ? 100U : 10U,
+                                (duplex == kPHY_FullDuplex) ? "full" : "half"));
+        }
+        else
+        {
+            LWIP_PLATFORM_DIAG(("Ethernet link up: %u Mbps, %s duplex.\r\n",
+                                (speed == kPHY_Speed100M) ? 100U : 10U,
+                                (duplex == kPHY_FullDuplex) ? "full" : "half"));
+        }
+
+        ethernetif->lastSpeed     = speed;
+        ethernetif->lastDuplex    = duplex;
+        ethernetif->linkModeValid = true;
+    }
+
+    ethernetif->lastLinkUp = true;
+}
+
+void ethernetif_on_link_down(struct netif *netif)
+{
+    struct ethernetif *ethernetif = netif->state;
+
+    ethernetif->lastLinkUp = false;
+    LWIP_PLATFORM_DIAG(("Ethernet link down.\r\n"));
 }
 
 /**

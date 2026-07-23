@@ -44,6 +44,7 @@
 #include "lwip/pbuf.h"
 #include "lwip/stats.h"
 #include "lwip/snmp.h"
+#include "lwip/timeouts.h"
 #include "lwip/ethip6.h"
 #include "netif/etharp.h"
 #include "netif/ppp/pppoe.h"
@@ -100,66 +101,88 @@ static int mmac_ref_list_is_initialized = 0;
  * Code
  ******************************************************************************/
 
-void ethernetif_phy_init(struct ethernetif *ethernetif,
-                         const ethernetif_config_t *ethernetifConfig,
-                         phy_speed_t *speed,
-                         phy_duplex_t *duplex)
+status_t ethernetif_phy_init(struct ethernetif *ethernetif, phy_handle_t *phyHandle)
 {
-    status_t status;
-    bool link              = false;
-    bool autonego          = false;
-    uint32_t initWaitCount = 0;
-    uint32_t autoWaitCount = 0;
     phy_config_t phyConfig = {
-        .phyAddr = ethernetifConfig->phyHandle->phyAddr,
+        .phyAddr = phyHandle->phyAddr,
         .autoNeg = true,
     };
 
-    ethernetifConfig->phyHandle->mdioHandle->resource.base = *ethernetif_enet_ptr(ethernetif);
+    phyHandle->mdioHandle->resource.base = *ethernetif_enet_ptr(ethernetif);
 
-    LWIP_PLATFORM_DIAG(("Initializing PHY..."));
+    return PHY_Init(phyHandle, &phyConfig);
+}
 
-    while ((initWaitCount < ENET_ATONEGOTIATION_TIMEOUT) && (!(link && autonego)))
+static bool ethernetif_link_mode_is_valid(phy_speed_t speed, phy_duplex_t duplex)
+{
+    return ((speed == kPHY_Speed10M) || (speed == kPHY_Speed100M)) &&
+           ((duplex == kPHY_HalfDuplex) || (duplex == kPHY_FullDuplex));
+}
+
+static void ethernetif_probe_link(struct netif *netif_, bool allowPhyInitRetry)
+{
+    phy_handle_t *phyHandle = ethernetif_get_phy(netif_);
+    status_t status;
+    bool link = false;
+
+    if (!ethernetif_is_phy_initialized(netif_))
     {
-        status = PHY_Init(ethernetifConfig->phyHandle, &phyConfig);
-
-        if (kStatus_Success != status)
+        if (!allowPhyInitRetry)
         {
-            LWIP_ASSERT("\r\nCannot initialize PHY.\r\n", 0);
+            return;
         }
 
-        /* Wait for auto-negotiation success and link up */
-        autoWaitCount = ENET_ATONEGOTIATION_TIMEOUT;
-        do
+        status = ethernetif_phy_init(netif_->state, phyHandle);
+        if (status != kStatus_Success)
         {
-            PHY_GetAutoNegotiationStatus(ethernetifConfig->phyHandle, &autonego);
-            PHY_GetLinkStatus(ethernetifConfig->phyHandle, &link);
-            if (autonego && link)
-            {
-                break;
-            }
-        } while (--autoWaitCount);
-        if (!autonego)
-        {
-            LWIP_PLATFORM_DIAG(
-                ("PHY Auto-negotiation failed. Please check the cable connection and link partner setting."));
+            return;
         }
 
-        initWaitCount++;
+        ethernetif_set_phy_initialized(netif_, true);
+        LWIP_PLATFORM_DIAG(("PHY initialization recovered.\r\n"));
     }
 
-    if (autonego && link)
+    status = PHY_GetLinkStatus(phyHandle, &link);
+    if (status != kStatus_Success)
     {
-        /* Get the actual PHY link speed. */
-        PHY_GetLinkSpeedDuplex(ethernetifConfig->phyHandle, speed, duplex);
+        return;
     }
-#if 0 /* Disable assert. If initial auto-negation is timeout, \ \ \ \ \
-         the ENET is set to default (100Mbs and full-duplex). */
-    else
+
+    if (!link)
     {
-        LWIP_ASSERT("\r\nGiving up PHY initialization. Please check the ENET cable connection and link partner setting and reset the board.\r\n", 0);
+        if (ethernetif_is_link_up(netif_))
+        {
+            netif_set_link_down(netif_);
+            ethernetif_on_link_down(netif_);
+        }
+
+        return;
     }
-#endif
+
+    phy_speed_t speed     = kPHY_Speed100M;
+    phy_duplex_t duplex   = kPHY_FullDuplex;
+    const bool wasLinkUp  = ethernetif_is_link_up(netif_);
+
+    status = PHY_GetLinkSpeedDuplex(phyHandle, &speed, &duplex);
+    if ((status != kStatus_Success) || !ethernetif_link_mode_is_valid(speed, duplex))
+    {
+        return;
+    }
+
+    ethernetif_on_link_up(netif_, speed, duplex);
+
+    if (!wasLinkUp)
+    {
+        netif_set_link_up(netif_);
+    }
+}
+
+static void ethernetif_probe_link_cyclic(void *netifArg)
+{
+    struct netif *netif_ = (struct netif *)netifArg;
+
+    sys_timeout(ETH_LINK_POLLING_INTERVAL_MS, ethernetif_probe_link_cyclic, netif_);
+    ethernetif_probe_link(netif_, true);
 }
 
 /**
@@ -239,8 +262,16 @@ err_t ethernetif_init(struct netif *netif_,
                       void *enetBase,
                       const ethernetif_config_t *ethernetifConfig)
 {
+    err_t result;
+
     LWIP_ASSERT("netif_ != NULL", (netif_ != NULL));
     LWIP_ASSERT("ethernetifConfig != NULL", (ethernetifConfig != NULL));
+
+    if ((netif_ == NULL) || (ethernetif == NULL) || (ethernetifConfig == NULL) ||
+        (ethernetifConfig->phyHandle == NULL) || (enetBase == NULL))
+    {
+        return ERR_ARG;
+    }
 
 #if LWIP_NETIF_HOSTNAME
     /* Initialize interface hostname */
@@ -280,7 +311,6 @@ err_t ethernetif_init(struct netif *netif_,
 
     /* Init ethernetif parameters.*/
     *ethernetif_enet_ptr(ethernetif) = enetBase;
-    LWIP_ASSERT("*ethernetif_enet_ptr(ethernetif) != NULL", (*ethernetif_enet_ptr(ethernetif) != NULL));
 
     /* set MAC hardware address length */
     netif_->hwaddr_len = ETH_HWADDR_LEN;
@@ -293,10 +323,14 @@ err_t ethernetif_init(struct netif *netif_,
 
     /* device capabilities */
     /* don't set NETIF_FLAG_ETHARP if this device is not an ethernet one */
-    netif_->flags |= NETIF_FLAG_BROADCAST | NETIF_FLAG_ETHARP | NETIF_FLAG_LINK_UP;
+    netif_->flags |= NETIF_FLAG_BROADCAST | NETIF_FLAG_ETHARP;
 
     /* ENET driver initialization.*/
-    ethernetif_enet_init(netif_, ethernetif, ethernetifConfig);
+    result = ethernetif_enet_init(netif_, ethernetif, ethernetifConfig);
+    if (result != ERR_OK)
+    {
+        return result;
+    }
 
 #if LWIP_IPV6 && LWIP_IPV6_MLD
     /*
@@ -311,6 +345,9 @@ err_t ethernetif_init(struct netif *netif_,
         netif_->mld_mac_filter(netif_, &ip6_allnodes_ll, NETIF_ADD_MAC_FILTER);
     }
 #endif /* LWIP_IPV6 && LWIP_IPV6_MLD */
+
+    ethernetif_probe_link(netif_, false);
+    sys_timeout(ETH_LINK_POLLING_INTERVAL_MS, ethernetif_probe_link_cyclic, netif_);
 
     return ERR_OK;
 }

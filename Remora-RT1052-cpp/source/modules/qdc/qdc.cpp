@@ -542,6 +542,12 @@ bool createQdc()
     }
     else
     {
+        if (IndexIrqGpioPinId < 0)
+        {
+            printf("QDC index IRQ is invalid\r\n");
+            return false;
+        }
+
         printf("  Quadrature Encoder has index at pin %s\n", pinI);
         qdcModule =
             new Qdc(

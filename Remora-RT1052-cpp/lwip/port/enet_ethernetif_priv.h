@@ -25,14 +25,23 @@ err_t ethernetif_init(struct netif *netif_,
                       void *enetBase,
                       const ethernetif_config_t *ethernetifConfig);
 
-void ethernetif_enet_init(struct netif *netif,
-                          struct ethernetif *ethernetif,
-                          const ethernetif_config_t *ethernetifConfig);
+err_t ethernetif_enet_init(struct netif *netif,
+                           struct ethernetif *ethernetif,
+                           const ethernetif_config_t *ethernetifConfig);
 
-void ethernetif_phy_init(struct ethernetif *ethernetif,
-                         const ethernetif_config_t *ethernetifConfig,
-                         phy_speed_t *speed,
-                         phy_duplex_t *duplex);
+status_t ethernetif_phy_init(struct ethernetif *ethernetif, phy_handle_t *phyHandle);
+
+phy_handle_t *ethernetif_get_phy(struct netif *netif);
+
+bool ethernetif_is_phy_initialized(struct netif *netif);
+
+void ethernetif_set_phy_initialized(struct netif *netif, bool initialized);
+
+bool ethernetif_is_link_up(struct netif *netif);
+
+void ethernetif_on_link_up(struct netif *netif, phy_speed_t speed, phy_duplex_t duplex);
+
+void ethernetif_on_link_down(struct netif *netif);
 
 void *ethernetif_get_enet_base(const uint8_t enetIdx);
 

@@ -24,6 +24,7 @@
 
 static mdio_handle_t mdioHandle = {.ops = &enet_ops};
 static phy_handle_t phyHandle   = {.phyAddr = BOARD_ENET0_PHY_ADDRESS, .mdioHandle = &mdioHandle, .ops = &phylan8720a_ops};
+static bool ethernetInitialized = false;
 struct netif netif;
 
 void udp_data_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip_addr_t *addr, u16_t port);
@@ -51,15 +52,35 @@ void initEthernet(void)
 
     lwip_init();
 
-    netif_add(&netif, &netif_ipaddr, &netif_netmask, &netif_gw, &enet_config, ethernetif0_init, ethernet_input);
+    struct netif *addedNetif =
+        netif_add(
+            &netif,
+            &netif_ipaddr,
+            &netif_netmask,
+            &netif_gw,
+            &enet_config,
+            ethernetif0_init,
+            ethernet_input);
+
+    if (addedNetif == nullptr)
+    {
+        PRINTF("Failed to initialize Ethernet interface !\r\n");
+        return;
+    }
+
     netif_set_default(&netif);
     netif_set_up(&netif);
 
+    ethernetInitialized = true;
 }
 
 void EthernetTasks(void)
 {
-    ethernetif_input(&netif);
+    if (ethernetInitialized)
+    {
+        ethernetif_input(&netif);
+    }
+
     sys_check_timeouts();
 }
 

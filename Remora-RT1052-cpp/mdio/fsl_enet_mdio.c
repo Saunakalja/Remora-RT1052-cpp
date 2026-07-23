@@ -11,6 +11,12 @@
  * Definitions
  ******************************************************************************/
 
+/* A Clause 22 transaction takes at most 64 MDC clocks. This fallback allows
+ * ample CPU polling margin while keeping a stalled SMI access finite. */
+#ifndef MDIO_TIMEOUT_COUNT
+#define MDIO_TIMEOUT_COUNT (0xFFFFU)
+#endif
+
 /*******************************************************************************
  * Prototypes
  ******************************************************************************/
@@ -176,12 +182,9 @@ static status_t ENET_MDIO_ReadExt(mdio_handle_t *handle, uint32_t phyAddr, uint3
 static status_t ENET_MDIO_WaitTransferOver(ENET_Type *base)
 {
     status_t result = kStatus_Success;
-#ifdef MDIO_TIMEOUT_COUNT
     uint32_t counter;
-#endif
 
     /* Wait for SMI complete. */
-#ifdef MDIO_TIMEOUT_COUNT
     for (counter = MDIO_TIMEOUT_COUNT; counter > 0U; counter--)
     {
         if (ENET_EIR_MII_MASK == (ENET_GetInterruptStatus(base) & ENET_EIR_MII_MASK))
@@ -194,10 +197,5 @@ static status_t ENET_MDIO_WaitTransferOver(ENET_Type *base)
     {
         result = kStatus_PHY_SMIVisitTimeout;
     }
-#else
-    while (ENET_EIR_MII_MASK != (ENET_GetInterruptStatus(base) & ENET_EIR_MII_MASK))
-    {
-    }
-#endif
     return result;
 }
