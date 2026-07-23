@@ -2,6 +2,9 @@
 
 #include "dma.h"
 
+bool DMA::prefillActive = false;
+
+
 // DMA constructor
 DMA::DMA(DMA_Type* DMAn, uint32_t frequency):
 	DMAn(DMAn),
@@ -145,6 +148,8 @@ void DMA::armCompletionTracking(void)
 
 void DMA::configDMA(void)
 {
+	prefillActive = false;
+
 	memset(stepgenDMAbuffer_0, 0, sizeof(stepgenDMAbuffer_0));
 	memset(stepgenDMAbuffer_1, 0, sizeof(stepgenDMAbuffer_1));
 
@@ -197,8 +202,24 @@ void DMA::configDMA(void)
 }
 
 
+void DMA::prefillSecondBuffer(void)
+{
+	this->clearCompletionState();
+
+	// The start caller has already prepared buffer 0.
+	stepgenDMAbuffer = true;
+	memset(stepgenDMAbuffer_1, 0, sizeof(stepgenDMAbuffer_1));
+
+	prefillActive = true;
+	dmaThread->run();
+	prefillActive = false;
+}
+
+
 void DMA::startDMA(void)
 {
+	this->prefillSecondBuffer();
+
 	const uint32_t primask =
 		__get_PRIMASK();
 
@@ -211,6 +232,12 @@ void DMA::startDMA(void)
 		primask);
 
 	printf("   Starting DMA Stepgen\n");
+}
+
+
+bool DMA::isPrefillActive(void)
+{
+	return prefillActive;
 }
 
 

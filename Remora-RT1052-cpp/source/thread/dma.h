@@ -59,6 +59,9 @@ class DMA
 		void latchCompletionFault(
 			edma_handle_t *handle);
 		void armCompletionTracking(void);
+		void prefillSecondBuffer(void);
+
+		static bool prefillActive;
 
 	public:
 
@@ -70,6 +73,7 @@ class DMA
 		CompletionResult takeCompletion(void);
 		bool completeBufferService(void);
 		void clearCompletionState(void);
+		static bool isPrefillActive(void);
 
 		edma_handle_t 			EDMA_Handle;
 };

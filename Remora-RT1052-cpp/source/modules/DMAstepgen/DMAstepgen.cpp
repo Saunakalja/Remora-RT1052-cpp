@@ -3,6 +3,9 @@
 #include <limits>
 
 
+static constexpr int32_t accumulatorUnitsPerDmaSlot =
+	RESOLUTION / 2;
+
 
 /***********************************************************************
                 MODULE CONFIGURATION AND CREATION FROM JSON     
@@ -93,10 +96,12 @@ DMAstepgen::DMAstepgen(int32_t threadFreq, int jointNumber, std::string step, st
 	dirMask(0),
 	isEnabled(false),
 	dir(false),
-	oldDir(false),
-	holdDDS(false),
+	queuedDirection(false),
+	pendingDirection(false),
+	pendingDirectionValue(false),
+	directionSetupPending(false),
 	isStepping(false),
-	dirChange(false),
+	hasLastStepFall(false),
 	frequencyCommand(0),
 	rawCount(0),
 	accumulator(0),
@@ -105,10 +110,11 @@ DMAstepgen::DMAstepgen(int32_t threadFreq, int jointNumber, std::string step, st
 	oldaddValue(0),
 	remainder(0),
 	prevRemainder(0),
-	stepPos(0),
-	dirPos(0),
-	stepHigh(0),
-	stepLow(0),
+	bufferStartSlot(0),
+	lastStepFallSlot(0),
+	pendingStepFallSlot(0),
+	pendingDirectionSlot(0),
+	directionSetupEndSlot(0),
 	stepPin(nullptr),
 	directionPin(nullptr),
 	debug(nullptr)
@@ -128,7 +134,6 @@ DMAstepgen::DMAstepgen(int32_t threadFreq, int jointNumber, std::string step, st
 	this->directionPin = new Pin(this->direction, OUTPUT);
 	this->accumulator = 0;
 	this->remainder = 0;
-	this->stepLow = 0;
 	this->mask = uint32_t{1} << this->jointNumber;
 	this->isEnabled = false;
 	this->dir = false;
@@ -138,7 +143,9 @@ DMAstepgen::DMAstepgen(int32_t threadFreq, int jointNumber, std::string step, st
 	if (this->dirHold == 0) this->dirHold = 1;
 	if (this->dirSetup == 0) this->dirSetup = 1;
 
-	this->minAddValue = (this->stepLength + this->stepSpace) * (RESOLUTION / 2);
+	this->minAddValue =
+		(this->stepLength + this->stepSpace) *
+		accumulatorUnitsPerDmaSlot;
 
 	// determine the step pin number from the portAndPin string
 	pin = this->step[3] - '0';
@@ -190,8 +197,40 @@ void DMAstepgen::makePulses()
 
 	this->isEnabled = ((*(this->ptrJointEnable) & this->mask) != 0);
 
+	// A disabled buffer-0 prefill resets the timeline, so align buffer 1 here.
+	if (DMA::isPrefillActive() &&
+		(this->bufferStartSlot == 0U))
+	{
+		this->bufferStartSlot =
+			static_cast<uint64_t>(
+				this->DMAbufferSize);
+	}
+
+	this->selectWriteBuffer();
+
+	const uint64_t bufferEndSlot =
+		this->bufferStartSlot +
+		static_cast<uint64_t>(
+			this->DMAbufferSize);
+
 	if (this->isEnabled)  									// this Step generator is enabled so make the pulses
 	{
+		// Complete a STEP pulse carried from the preceding writable buffer.
+		if (this->isStepping &&
+			(this->pendingStepFallSlot >= this->bufferStartSlot) &&
+			(this->pendingStepFallSlot < bufferEndSlot))
+		{
+			const uint32_t stepLow =
+				static_cast<uint32_t>(
+					this->pendingStepFallSlot -
+					this->bufferStartSlot);
+
+			*(this->stepDMAbuffer + stepLow) |=
+				this->stepMask;
+
+			this->isStepping = false;
+		}
+
 		this->frequencyCommand = *(this->ptrFrequencyCommand);            		// Get the latest frequency command via pointer to the data source
 		if (this->frequencyCommand != 0)
 		{
@@ -231,61 +270,82 @@ void DMAstepgen::makePulses()
 				this->addValue = this->minAddValue;			// limit the frequency to step requirements
 			}
 
-			// determine which ping-pong buffer to fill
-			if (!*stepDMAactiveBuffer)	// false = buffer_0
+			this->dir =
+				(this->frequencyCommand > 0);
+
+			// A direction request can be cancelled before its toggle is queued.
+			if (this->pendingDirection &&
+				(this->dir != this->pendingDirectionValue))
 			{
-				stepDMAbuffer = stepDMAbuffer_0;
-			}
-			else // buffer_1
-			{
-				stepDMAbuffer = stepDMAbuffer_1;
+				this->pendingDirection = false;
 			}
 
-			// get the current dir output
-			this->oldDir = this->directionPin->get();
+			if (!this->pendingDirection &&
+				(this->dir != this->queuedDirection))
+			{
+				this->pendingDirection = true;
+				this->pendingDirectionValue = this->dir;
+				this->pendingDirectionSlot =
+					this->bufferStartSlot;
 
-			// what's the direction for this period
-			if (this->frequencyCommand < 0)
-			{
-				this->dir = false; // backwards
-			}
-			else
-			{
-				this->dir = true; // forwards
-			}
-
-			// change of direction?
-			if (this->dir != this->oldDir)
-			{
-				this->dirChange = true;
-			}
-
-			if (this->dirChange)
-			{
-				if (this->isStepping)
+				if (this->hasLastStepFall)
 				{
-					this->dirPos = this->stepLow + this->dirHold;
-				}
-				else if (this->prevRemainder < this->dirHold)
-				{
-					this->dirPos = this->dirHold - this->prevRemainder;
-				}
-				else
-				{
-					this->dirPos = 0;
-				}
+					const uint64_t holdEndSlot =
+						this->lastStepFallSlot +
+						static_cast<uint64_t>(
+							this->dirHold);
 
-				// toggle the direction pin
-				*(stepDMAbuffer + this->dirPos) |= this->dirMask;
+					if (this->pendingDirectionSlot <
+						holdEndSlot)
+					{
+						this->pendingDirectionSlot =
+							holdEndSlot;
+					}
+				}
 			}
 
-			// finish the step from the previous period if needed
-			if (this->isStepping)
+			if (this->pendingDirection &&
+				(this->pendingDirectionSlot >=
+					this->bufferStartSlot) &&
+				(this->pendingDirectionSlot <
+					bufferEndSlot))
 			{
-				// put step low into DMA buffer
-				*(stepDMAbuffer + this->stepLow) |= this->stepMask;
-				this->stepLow = 0;
-				this->isStepping = false;
+				const uint32_t directionSlot =
+					static_cast<uint32_t>(
+						this->pendingDirectionSlot -
+						this->bufferStartSlot);
+
+				*(this->stepDMAbuffer + directionSlot) |=
+					this->dirMask;
+
+				this->queuedDirection =
+					this->pendingDirectionValue;
+				this->pendingDirection = false;
+				this->directionSetupPending = true;
+				this->directionSetupEndSlot =
+					this->pendingDirectionSlot +
+					static_cast<uint64_t>(
+						this->dirSetup);
+			}
+
+			if (this->pendingDirection ||
+				(this->dir != this->queuedDirection))
+			{
+				this->advanceDdsWithoutStep();
+				this->bufferStartSlot =
+					bufferEndSlot;
+				return;
+			}
+
+			uint64_t firstStepSlot =
+				this->bufferStartSlot;
+
+			if (this->directionSetupPending &&
+				(firstStepSlot <
+					this->directionSetupEndSlot))
+			{
+				firstStepSlot =
+					this->directionSetupEndSlot;
 			}
 
 			// accumulator cannot go negative, so keep prevRemainder within limits
@@ -299,98 +359,196 @@ void DMAstepgen::makePulses()
 				// at least one step in this period
 				this->accumulator = this->addValue - this->prevRemainder;
 
-				if (this->dirChange)
+				if (firstStepSlot >= bufferEndSlot)
 				{
-					this->stepPos = (this->dirPos + this->dirSetup)*(RESOLUTION/2);
-					if (this->accumulator < this->stepPos)
-					{
-						this->accumulator = this->stepPos;
-					}
+					this->advanceDdsWithoutStep();
+					this->bufferStartSlot =
+						bufferEndSlot;
+					return;
+				}
+
+				const uint64_t firstStepAccumulator =
+					(firstStepSlot -
+						this->bufferStartSlot) *
+					static_cast<uint64_t>(
+						accumulatorUnitsPerDmaSlot);
+
+				if (static_cast<uint64_t>(
+						this->accumulator) <
+					firstStepAccumulator)
+				{
+					this->accumulator =
+						static_cast<int32_t>(
+							firstStepAccumulator);
 				}
 
 				this->remainder = BUFFER_COUNTS - this->accumulator;
 
-				// ensure we are within the buffer size
-				if (this-> remainder == 0)
-				{
-					this->accumulator--;
-				}
+				const uint32_t firstStep =
+					static_cast<uint32_t>(
+						this->accumulator /
+						accumulatorUnitsPerDmaSlot);
 
-				this->makeStep();
-
-				while (this->remainder >= this->addValue)
+				if (firstStep <
+					this->DMAbufferSize)
 				{
-					// we can still step in this period
-					this->accumulator = this->accumulator + this->addValue;
-					this->remainder = BUFFER_COUNTS - this->accumulator;
-					if (this-> remainder == 0)
+					this->makeStep(
+						firstStep,
+						this->bufferStartSlot,
+						bufferEndSlot);
+
+					this->directionSetupPending = false;
+
+					while (this->remainder >
+						this->addValue)
 					{
-						this->accumulator--;
+						// we can still step in this period
+						this->accumulator =
+							this->accumulator +
+							this->addValue;
+						this->remainder =
+							BUFFER_COUNTS -
+							this->accumulator;
+
+						const uint32_t nextStep =
+							static_cast<uint32_t>(
+								this->accumulator /
+								accumulatorUnitsPerDmaSlot);
+
+						this->makeStep(
+							nextStep,
+							this->bufferStartSlot,
+							bufferEndSlot);
 					}
-					this->makeStep();
+
+					// carry elapsed DDS units since the final STEP rise
+					this->prevRemainder =
+						this->remainder;
+
+					*(this->ptrFeedback) = this->rawCount;                     // Update position feedback via pointer to the data receiver
+				}
+				else
+				{
+					// A STEP exactly at the boundary belongs to the next buffer.
+					this->advanceDdsWithoutStep();
 				}
 
-				// reset accumulator and carry remainder into the next period
 				this->accumulator = 0;
-				this->prevRemainder = this->remainder;
-				this->dirChange = false;
-
-				*(this->ptrFeedback) = this->rawCount;                     // Update position feedback via pointer to the data receiver
 			}
 			else
 			{
-				this->prevRemainder = this->prevRemainder + BUFFER_COUNTS;
-				this->dirChange = false;
+				this->advanceDdsWithoutStep();
 			}
 		}
-		else if (this->isStepping)
-		{
-			// Select the currently writable ping-pong buffer.
-			if (!*stepDMAactiveBuffer)
-			{
-				stepDMAbuffer = stepDMAbuffer_0;
-			}
-			else
-			{
-				stepDMAbuffer = stepDMAbuffer_1;
-			}
 
-			// Complete the STEP pulse carried over from the previous DMA period.
-			*(stepDMAbuffer + this->stepLow) |= this->stepMask;
-			this->stepLow = 0;
-			this->isStepping = false;
-		}
+		this->bufferStartSlot =
+			bufferEndSlot;
 	}
 	else
 	{
 		// ensure the pin is in a know state as we're using DR_TOGGLE
 		this->stepPin->set(0);
 		this->directionPin->set(0);
-		this->dir = true;
-		this->prevRemainder = 0;
-		this->isStepping = false;
+
+		if (DMAthreadRunning ||
+			DMA::isPrefillActive())
+		{
+			this->dir = false;
+			this->queuedDirection = false;
+			this->pendingDirection = false;
+			this->directionSetupPending = false;
+			this->prevRemainder = 0;
+			this->isStepping = false;
+			this->hasLastStepFall = false;
+			this->lastStepFallSlot = 0;
+			this->pendingStepFallSlot = 0;
+			this->pendingDirectionSlot = 0;
+			this->directionSetupEndSlot = 0;
+			this->bufferStartSlot =
+				bufferEndSlot;
+		}
+		else
+		{
+			this->dir = false;
+			this->queuedDirection = false;
+			this->pendingDirection = false;
+			this->pendingDirectionValue = false;
+			this->directionSetupPending = false;
+			this->isStepping = false;
+			this->hasLastStepFall = false;
+			this->accumulator = 0;
+			this->remainder = 0;
+			this->prevRemainder = 0;
+			this->bufferStartSlot = 0;
+			this->lastStepFallSlot = 0;
+			this->pendingStepFallSlot = 0;
+			this->pendingDirectionSlot = 0;
+			this->directionSetupEndSlot = 0;
+		}
 	}
 }
 
 
-void DMAstepgen::makeStep()
+void DMAstepgen::selectWriteBuffer()
 {
-	// map stepPos (1 - 500) to DMA buffer (0 - 999)
-	this->stepPos = this->accumulator / (RESOLUTION / 2);
-	this->stepHigh = this->stepPos;
-
-	// respect direction setup time
-	if (this->dirChange && this->stepHigh == 0)
+	if (!*this->stepDMAactiveBuffer)
 	{
-		this->stepHigh = this->dirSetup;
+		this->stepDMAbuffer =
+			this->stepDMAbuffer_0;
 	}
+	else
+	{
+		this->stepDMAbuffer =
+			this->stepDMAbuffer_1;
+	}
+}
 
-	this->stepLow = this->stepHigh + this->stepLength;
 
-	// put step high into DMA buffer
-	*(stepDMAbuffer + this->stepHigh) |= this->stepMask;
-	this->stepHigh = 0;
-	this->isStepping = true;
+void DMAstepgen::advanceDdsWithoutStep()
+{
+	const int64_t advancedRemainder =
+		static_cast<int64_t>(
+			this->prevRemainder) +
+		static_cast<int64_t>(
+			BUFFER_COUNTS);
+
+	if (advancedRemainder >
+		static_cast<int64_t>(
+			this->addValue))
+	{
+		this->prevRemainder =
+			this->addValue;
+	}
+	else
+	{
+		this->prevRemainder =
+			static_cast<int32_t>(
+				advancedRemainder);
+	}
+}
+
+
+void DMAstepgen::makeStep(
+	uint32_t stepHigh,
+	uint64_t bufferStartSlot,
+	uint64_t bufferEndSlot)
+{
+	*(this->stepDMAbuffer + stepHigh) |=
+		this->stepMask;
+
+	const uint64_t absoluteStepHigh =
+		bufferStartSlot +
+		static_cast<uint64_t>(
+			stepHigh);
+
+	this->pendingStepFallSlot =
+		absoluteStepHigh +
+		static_cast<uint64_t>(
+			this->stepLength);
+
+	this->lastStepFallSlot =
+		this->pendingStepFallSlot;
+	this->hasLastStepFall = true;
 
 	// update the raw step count
 	if (this->dir)
@@ -406,18 +564,21 @@ void DMAstepgen::makeStep()
 				this->rawCount);
 	}
 
-	// put step low into DMA buffer
-	// step low could be in the next period (buffer)
-	if (this->stepLow <= DMA_BUFFER_SIZE - 1)
+	if (this->pendingStepFallSlot < bufferEndSlot)
 	{
-		// put step low into DMA buffer
-		*(stepDMAbuffer + this->stepLow) |= this->stepMask;
-		this->stepLow = 0;
+		const uint32_t stepLow =
+			static_cast<uint32_t>(
+				this->pendingStepFallSlot -
+				bufferStartSlot);
+
+		*(this->stepDMAbuffer + stepLow) |=
+			this->stepMask;
+
 		this->isStepping = false;
 	}
 	else
 	{
-		this->stepLow = this->stepLow - DMA_BUFFER_SIZE;
+		this->isStepping = true;
 	}
 }
 
