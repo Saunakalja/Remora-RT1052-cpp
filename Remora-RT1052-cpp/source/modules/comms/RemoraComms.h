@@ -16,13 +16,14 @@ class RemoraComms : public Module
 	volatile bool	data;
 	volatile bool	status;
 
-	uint8_t		noDataCount;
+	uint32_t	noDataCount;
+	uint32_t	noDataLimit;
 
 	Pin*		CommsPin;
 
   public:
 
-	RemoraComms(void);
+	RemoraComms(uint32_t servoFrequency);
 
 	virtual void update(void);
 	void dataReceived();

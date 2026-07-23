@@ -5,6 +5,11 @@
 #define PRU_BASEFREQ    	40000    		// PRU Base thread ISR update frequency (hz)
 #define PRU_SERVOFREQ       1000            // PRU Servo thread ISR update freqency (hz)
 
+#define PRU_BASEFREQ_MIN    40000U
+#define PRU_BASEFREQ_MAX    500000U
+#define PRU_SERVOFREQ_MIN   500U
+#define PRU_SERVOFREQ_MAX   2000U
+
 #define FREQ_RATIO 			DMA_FREQ/ PRU_SERVOFREQ
 #define DMA_BUFFER_SIZE		2 * FREQ_RATIO
 #define RESOLUTION			1000				// multiply and divide resolution for integer calculations
@@ -27,7 +32,7 @@
 
 #define BUFFER_SIZE			64
 
-#define DATA_ERR_MAX		5
+#define COMMS_TIMEOUT_US    6000U
 
 // Connection LED
 #define LED 				"P3_00"

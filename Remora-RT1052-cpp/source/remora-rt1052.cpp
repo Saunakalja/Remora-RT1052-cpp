@@ -742,6 +742,18 @@ void configThreads()
                 return;
             }
 
+            if ((frequency < PRU_BASEFREQ_MIN) ||
+                (frequency > PRU_BASEFREQ_MAX))
+            {
+                printf(
+                    "Base thread frequency %lu is outside allowed range %lu-%lu Hz\n",
+                    static_cast<unsigned long>(frequency),
+                    static_cast<unsigned long>(PRU_BASEFREQ_MIN),
+                    static_cast<unsigned long>(PRU_BASEFREQ_MAX));
+                configError = true;
+                return;
+            }
+
             configuredBaseFreq =
                 frequency;
 
@@ -752,6 +764,18 @@ void configThreads()
             if (servoConfigured)
             {
                 printf("Duplicate Servo thread configuration\n");
+                configError = true;
+                return;
+            }
+
+            if ((frequency < PRU_SERVOFREQ_MIN) ||
+                (frequency > PRU_SERVOFREQ_MAX))
+            {
+                printf(
+                    "Servo thread frequency %lu is outside allowed range %lu-%lu Hz\n",
+                    static_cast<unsigned long>(frequency),
+                    static_cast<unsigned long>(PRU_SERVOFREQ_MIN),
+                    static_cast<unsigned long>(PRU_SERVOFREQ_MAX));
                 configError = true;
                 return;
             }
@@ -771,6 +795,16 @@ void configThreads()
         }
 
         threadIndex++;
+    }
+
+    if (configuredServoFreq > configuredBaseFreq)
+    {
+        printf(
+            "Servo thread frequency %lu exceeds Base thread frequency %lu\n",
+            static_cast<unsigned long>(configuredServoFreq),
+            static_cast<unsigned long>(configuredBaseFreq));
+        configError = true;
+        return;
     }
 
     base_freq =
@@ -793,7 +827,7 @@ void loadModules(void)
     printf("\n5. Loading modules\n");
 
 	// Ethernet communication monitoring
-	comms = new RemoraComms();
+	comms = new RemoraComms(servo_freq);
 	servoThread->registerModule(comms);
 	hasServoThread = true;
 
