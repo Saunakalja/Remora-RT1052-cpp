@@ -619,12 +619,10 @@ static void IAP_tftp_restore_execution(
              i < MAX_INST_QDC_MOD;
              i++)
         {
-            if (qdc[i] == nullptr)
+            if (qdc[i] != nullptr)
             {
-                break;
+                qdc[i]->enableInterrupt();
             }
-
-            qdc[i]->enableInterrupt();
         }
     }
 }
@@ -739,8 +737,6 @@ static int IAP_tftp_process_write(struct udp_pcb *upcb, const ip_addr_t *to, int
 	  {
 		  if(qdc[i]!=nullptr)
 			  qdc[i]->disableInterrupt();
-		  else
-			  break;
 	  }
   }
 
