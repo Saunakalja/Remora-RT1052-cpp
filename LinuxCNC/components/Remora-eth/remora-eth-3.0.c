@@ -158,7 +158,8 @@ RTAPI_MP_INT(PRU_base_freq, "PRU base thread frequency");
 #define TRANSFER_TIMEOUT_NS 500000LL
 
 static int udpSocket = -1;
-static int errCount;
+static uint8_t readErrCount;
+static uint8_t writeErrCount;
 static bool enableWasActive = false;
 struct sockaddr_in dstAddr, srcAddr;
 struct hostent *server;
@@ -174,7 +175,7 @@ static void UDP_close(void);
 static void update_freq(void *arg, long period);
 static void pru_write();
 static void pru_read();
-static void pru_transfer(int txSize, int rxSize);
+static void pru_transfer(int txSize, int rxSize, uint8_t *errorCount);
 static CONTROL parse_ctrl_type(const char *ctrl);
 
 
@@ -757,7 +758,10 @@ void pru_read()
 			// reset rising edge detected, try transfer and reset OR PRU running
 			
 			// Transfer to and from the PRU
-			pru_transfer(sizeof(txData.header), BUFFER_SIZE);
+			pru_transfer(
+				sizeof(txData.header),
+				BUFFER_SIZE,
+				&readErrCount);
 			
 			switch (rxData.header)		// only process valid SPI payloads. This rejects bad payloads
 			{
@@ -901,7 +905,10 @@ void pru_write()
 	if (*(data->status) || sendSafeStop)
 	{
 		// Transfer to and from the PRU
-		pru_transfer(BUFFER_SIZE, sizeof(rxData.header));
+		pru_transfer(
+			BUFFER_SIZE,
+			sizeof(rxData.header),
+			&writeErrCount);
 		
 		switch (rxData.header)
 		{
@@ -934,7 +941,7 @@ void pru_write()
 }
 
 
-void pru_transfer(int txSize, int rxSize)
+void pru_transfer(int txSize, int rxSize, uint8_t *errorCount)
 {
 	int ret;
 	long long t1, t2;
@@ -994,15 +1001,19 @@ void pru_transfer(int txSize, int rxSize)
 
 	if (validResponse)
 	{
-		errCount = 0;
+		*errorCount = 0U;
 	}
 	else
 	{
 		rxData.header = PRU_ERR;
-		errCount++;
+
+		if (*errorCount < 3U)
+		{
+			(*errorCount)++;
+		}
 	}
 	
-	if (errCount > 2)
+	if (*errorCount > 2U)
 	{
 		*(data->status) = 0;
 		rtapi_print("Ethernet ERROR: %s\n", strerror(errno));
