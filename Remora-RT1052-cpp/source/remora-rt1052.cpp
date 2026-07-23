@@ -168,6 +168,14 @@ JsonObject module;
 
 int8_t checkJson()
 {
+	SCB_InvalidateDCache_by_Addr(
+		reinterpret_cast<volatile void*>(
+			XIP_BASE +
+			JSON_UPLOAD_ADDRESS),
+		static_cast<int32_t>(
+			METADATA_LEN +
+			JSON_BUFF_SIZE));
+
 	metadata_t* meta = (metadata_t*)(XIP_BASE + JSON_UPLOAD_ADDRESS);
 	const uint32_t jsonLength =
 		meta->jsonLength;
