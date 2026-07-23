@@ -2351,12 +2351,21 @@ int main(void)
 		{
 			printf("\n\nChecking new configuration file\n");
 
-			if (checkJson() > 0)
+			if (checkJson() <= 0)
+			{
+				IAP_tftp_finalize_upload(false);
+			}
+			else
 			{
 				printf("Moving new configuration file to Flash storage\n");
 				if (moveJson())
 				{
+					IAP_tftp_finalize_upload(true);
 					NVIC_SystemReset();
+				}
+				else
+				{
+					IAP_tftp_finalize_upload(false);
 				}
 			}
 		}

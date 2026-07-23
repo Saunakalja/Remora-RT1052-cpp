@@ -88,6 +88,7 @@ extern "C" {
 #endif
 
 void IAP_tftpd_init(edma_handle_t);
+void IAP_tftp_finalize_upload(bool);
 
 #ifdef __cplusplus
 }

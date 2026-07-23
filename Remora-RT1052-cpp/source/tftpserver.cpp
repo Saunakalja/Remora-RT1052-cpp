@@ -34,6 +34,14 @@ static __IO uint32_t total_count=0;
 static edma_handle_t edma_handle;
 static bool tftpTransferActive =
     false;
+static bool tftpFinalizationPending =
+    false;
+static bool tftpPendingRestoreThreads =
+    false;
+static bool tftpPendingRestoreDMA =
+    false;
+static bool tftpPendingRestoreQdc =
+    false;
 extern bool threadsRunning;
 
 
@@ -563,6 +571,15 @@ static void IAP_wrq_recv_callback(void *_args, struct udp_pcb *upcb, struct pbuf
   if (expectedBlockAccepted &&
       (pkt_buf->len < TFTP_DATA_PKT_LEN_MAX))
   {
+    tftpPendingRestoreThreads =
+        args->restoreThreads;
+    tftpPendingRestoreDMA =
+        args->restoreDMA;
+    tftpPendingRestoreQdc =
+        args->restoreQdc;
+    tftpFinalizationPending =
+        true;
+
     IAP_tftp_cleanup_wr(upcb, args);
     pbuf_free(pkt_buf);
     newJson = true;
@@ -851,7 +868,8 @@ static void IAP_tftp_recv_callback(void *arg, struct udp_pcb *upcb, struct pbuf 
     return;
   }
 
-  if (tftpTransferActive)
+  if (tftpTransferActive ||
+      tftpFinalizationPending)
   {
     PRINTF(
         "TFTP configuration upload already active !\r\n");
@@ -933,6 +951,39 @@ static void IAP_tftp_cleanup_wr(struct udp_pcb *upcb, tftp_connection_args *args
 }
 
 /* Global functions ---------------------------------------------------------*/
+
+void IAP_tftp_finalize_upload(
+    bool uploadSucceeded)
+{
+  if (!tftpFinalizationPending)
+  {
+    return;
+  }
+
+  const bool restoreThreads =
+      tftpPendingRestoreThreads;
+  const bool restoreDMA =
+      tftpPendingRestoreDMA;
+  const bool restoreQdc =
+      tftpPendingRestoreQdc;
+
+  tftpFinalizationPending =
+      false;
+  tftpPendingRestoreThreads =
+      false;
+  tftpPendingRestoreDMA =
+      false;
+  tftpPendingRestoreQdc =
+      false;
+
+  if (!uploadSucceeded)
+  {
+    IAP_tftp_restore_execution(
+        restoreThreads,
+        restoreDMA,
+        restoreQdc);
+  }
+}
 
 /**
   * @brief  Creates and initializes a UDP PCB for TFTP receive operation
