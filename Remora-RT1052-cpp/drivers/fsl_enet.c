@@ -138,6 +138,14 @@ static void ENET_SetRxBufferDescriptors(enet_handle_t *handle,
                                         const enet_buffer_config_t *bufferConfig);
 
 /*!
+ * @brief Releases one ENET read buffer descriptor back to hardware.
+ *
+ * @param handle The ENET handle pointer.
+ * @param ringId The descriptor ring index, range from 0 ~ (FSL_FEATURE_ENET_INSTANCE_QUEUEn(x) - 1).
+ */
+static void ENET_ReleaseRxBufferDescriptor(enet_handle_t *handle, uint8_t ringId);
+
+/*!
  * @brief Updates the ENET read buffer descriptors.
  *
  * @param base ENET peripheral base address.
@@ -145,6 +153,37 @@ static void ENET_SetRxBufferDescriptors(enet_handle_t *handle,
  * @param ringId The descriptor ring index, range from 0 ~ (FSL_FEATURE_ENET_INSTANCE_QUEUEn(x) - 1).
  */
 static void ENET_UpdateReadBuffers(ENET_Type *base, enet_handle_t *handle, uint8_t ringId);
+
+/*! @brief Snapshot of receive buffer descriptor fields used by receive logic. */
+typedef struct _enet_rx_bd_snapshot
+{
+    uint16_t length;
+    uint16_t control;
+    uint8_t *buffer;
+#ifdef ENET_ENHANCEDBUFFERDESCRIPTOR_MODE
+    uint16_t controlExtend1;
+    uint32_t timestamp;
+#endif /* ENET_ENHANCEDBUFFERDESCRIPTOR_MODE */
+} enet_rx_bd_snapshot_t;
+
+static inline void ENET_GetRxBdSnapshot(volatile enet_rx_bd_struct_t *bd, enet_rx_bd_snapshot_t *snapshot)
+{
+    uint16_t controlFirst;
+
+    do
+    {
+        __DMB();
+        controlFirst            = bd->control;
+        snapshot->length        = bd->length;
+        snapshot->buffer        = bd->buffer;
+#ifdef ENET_ENHANCEDBUFFERDESCRIPTOR_MODE
+        snapshot->controlExtend1 = bd->controlExtend1;
+        snapshot->timestamp      = bd->timestamp;
+#endif /* ENET_ENHANCEDBUFFERDESCRIPTOR_MODE */
+        __DMB();
+        snapshot->control = bd->control;
+    } while (snapshot->control != controlFirst);
+}
 
 /*!
  * @brief Updates index.
@@ -1449,17 +1488,19 @@ void ENET_GetRxErrBeforeReadFrame(enet_handle_t *handle, enet_data_error_stats_t
     assert(eErrorStatic != NULL);
     assert(ringId < (uint8_t)FSL_FEATURE_ENET_QUEUE);
 
-    uint16_t control                             = 0;
-    enet_rx_bd_ring_t *rxBdRing                  = &handle->rxBdRing[ringId];
-    volatile enet_rx_bd_struct_t *curBuffDescrip = rxBdRing->rxBdBase + rxBdRing->rxGenIdx;
-    volatile enet_rx_bd_struct_t *cmpBuffDescrip = curBuffDescrip;
+    uint16_t control            = 0;
+    enet_rx_bd_ring_t *rxBdRing = &handle->rxBdRing[ringId];
+    uint16_t index              = rxBdRing->rxGenIdx;
+    enet_rx_bd_snapshot_t snapshot;
 
     do
     {
+        ENET_GetRxBdSnapshot(rxBdRing->rxBdBase + index, &snapshot);
+
         /* The last buffer descriptor of a frame. */
-        if (0U != (curBuffDescrip->control & ENET_BUFFDESCRIPTOR_RX_LAST_MASK))
+        if (0U != (snapshot.control & ENET_BUFFDESCRIPTOR_RX_LAST_MASK))
         {
-            control = curBuffDescrip->control;
+            control = snapshot.control;
             if (0U != (control & ENET_BUFFDESCRIPTOR_RX_TRUNC_MASK))
             {
                 /* The receive truncate error. */
@@ -1486,18 +1527,17 @@ void ENET_GetRxErrBeforeReadFrame(enet_handle_t *handle, enet_data_error_stats_t
                 eErrorStatic->statsRxFcsErr++;
             }
 #ifdef ENET_ENHANCEDBUFFERDESCRIPTOR_MODE
-            uint16_t controlExt = curBuffDescrip->controlExtend1;
-            if (0U != (controlExt & ENET_BUFFDESCRIPTOR_RX_MACERR_MASK))
+            if (0U != (snapshot.controlExtend1 & ENET_BUFFDESCRIPTOR_RX_MACERR_MASK))
             {
                 /* The MAC error. */
                 eErrorStatic->statsRxMacErr++;
             }
-            if (0U != (controlExt & ENET_BUFFDESCRIPTOR_RX_PHYERR_MASK))
+            if (0U != (snapshot.controlExtend1 & ENET_BUFFDESCRIPTOR_RX_PHYERR_MASK))
             {
                 /* The PHY error. */
                 eErrorStatic->statsRxPhyErr++;
             }
-            if (0U != (controlExt & ENET_BUFFDESCRIPTOR_RX_COLLISION_MASK))
+            if (0U != (snapshot.controlExtend1 & ENET_BUFFDESCRIPTOR_RX_COLLISION_MASK))
             {
                 /* The receive collision error. */
                 eErrorStatic->statsRxCollisionErr++;
@@ -1507,17 +1547,8 @@ void ENET_GetRxErrBeforeReadFrame(enet_handle_t *handle, enet_data_error_stats_t
             break;
         }
 
-        /* Increase the buffer descriptor, if it's the last one, increase to first one of the ring buffer. */
-        if (0U != (curBuffDescrip->control & ENET_BUFFDESCRIPTOR_RX_WRAP_MASK))
-        {
-            curBuffDescrip = rxBdRing->rxBdBase;
-        }
-        else
-        {
-            curBuffDescrip++;
-        }
-
-    } while (curBuffDescrip != cmpBuffDescrip);
+        index = ENET_IncreaseIndex(index, rxBdRing->rxRingLen);
+    } while (index != rxBdRing->rxGenIdx);
 }
 
 /*!
@@ -1572,14 +1603,17 @@ status_t ENET_GetRxFrameSize(enet_handle_t *handle, uint32_t *length, uint8_t ri
     uint16_t validLastMask                       = ENET_BUFFDESCRIPTOR_RX_LAST_MASK | ENET_BUFFDESCRIPTOR_RX_EMPTY_MASK;
     enet_rx_bd_ring_t *rxBdRing                  = &handle->rxBdRing[ringId];
     volatile enet_rx_bd_struct_t *curBuffDescrip = rxBdRing->rxBdBase + rxBdRing->rxGenIdx;
+    enet_rx_bd_snapshot_t snapshot;
     uint16_t index                               = rxBdRing->rxGenIdx;
     bool isReturn                                = false;
     status_t result                              = kStatus_Success;
 
+    ENET_GetRxBdSnapshot(curBuffDescrip, &snapshot);
+
     /* Check the current buffer descriptor's empty flag. If empty means there is no frame received. */
     /* If this buffer descriptor is owned by application, return empty. Only need to check the first BD's owner if one
      * frame in mutiple BDs. */
-    if (0U != (curBuffDescrip->control & (ENET_BUFFDESCRIPTOR_RX_EMPTY_MASK | ENET_BUFFDESCRIPTOR_RX_SOFTOWNER1_MASK)))
+    if (0U != (snapshot.control & (ENET_BUFFDESCRIPTOR_RX_EMPTY_MASK | ENET_BUFFDESCRIPTOR_RX_SOFTOWNER1_MASK)))
     {
         isReturn = true;
         result   = kStatus_ENET_RxFrameEmpty;
@@ -1589,7 +1623,7 @@ status_t ENET_GetRxFrameSize(enet_handle_t *handle, uint32_t *length, uint8_t ri
         do
         {
             /* Add check for abnormal case. */
-            if (curBuffDescrip->length == 0U)
+            if (snapshot.length == 0U)
             {
                 isReturn = true;
                 result   = kStatus_ENET_RxFrameError;
@@ -1597,17 +1631,17 @@ status_t ENET_GetRxFrameSize(enet_handle_t *handle, uint32_t *length, uint8_t ri
             }
 
             /* Find the last buffer descriptor. */
-            if ((curBuffDescrip->control & validLastMask) == ENET_BUFFDESCRIPTOR_RX_LAST_MASK)
+            if ((snapshot.control & validLastMask) == ENET_BUFFDESCRIPTOR_RX_LAST_MASK)
             {
                 isReturn = true;
                 /* The last buffer descriptor in the frame check the status of the received frame. */
-                if (0U != (curBuffDescrip->control & ENET_BUFFDESCRIPTOR_RX_ERR_MASK))
+                if (0U != (snapshot.control & ENET_BUFFDESCRIPTOR_RX_ERR_MASK))
                 {
                     result = kStatus_ENET_RxFrameError;
                     break;
                 }
 #ifdef ENET_ENHANCEDBUFFERDESCRIPTOR_MODE
-                if (0U != (curBuffDescrip->controlExtend1 & ENET_BUFFDESCRIPTOR_RX_EXT_ERR_MASK))
+                if (0U != (snapshot.controlExtend1 & ENET_BUFFDESCRIPTOR_RX_EXT_ERR_MASK))
                 {
                     result = kStatus_ENET_RxFrameError;
                     break;
@@ -1615,12 +1649,13 @@ status_t ENET_GetRxFrameSize(enet_handle_t *handle, uint32_t *length, uint8_t ri
 #endif /* ENET_ENHANCEDBUFFERDESCRIPTOR_MODE */
 
                 /* FCS is removed by MAC. */
-                *length = curBuffDescrip->length;
+                *length = snapshot.length;
                 break;
             }
             /* Increase the buffer descriptor, if it is the last one, increase to first one of the ring buffer. */
             index          = ENET_IncreaseIndex(index, rxBdRing->rxRingLen);
             curBuffDescrip = rxBdRing->rxBdBase + index;
+            ENET_GetRxBdSnapshot(curBuffDescrip, &snapshot);
         } while (index != rxBdRing->rxGenIdx);
     }
 
@@ -1690,6 +1725,7 @@ status_t ENET_ReadFrame(
     bool isLastBuff                              = false;
     enet_rx_bd_ring_t *rxBdRing                  = &handle->rxBdRing[ringId];
     volatile enet_rx_bd_struct_t *curBuffDescrip = rxBdRing->rxBdBase + rxBdRing->rxGenIdx;
+    enet_rx_bd_snapshot_t snapshot;
     uint16_t index                               = rxBdRing->rxGenIdx;
     status_t result                              = kStatus_Success;
     uint32_t address;
@@ -1700,8 +1736,10 @@ status_t ENET_ReadFrame(
     {
         do
         {
+            ENET_GetRxBdSnapshot(curBuffDescrip, &snapshot);
+
             /* Update the control flag. */
-            control = curBuffDescrip->control;
+            control = snapshot.control;
 
             /* Updates the receive buffer descriptors. */
             ENET_UpdateReadBuffers(base, handle, ringId);
@@ -1718,11 +1756,13 @@ status_t ENET_ReadFrame(
     {
         while (!isLastBuff)
         {
+            ENET_GetRxBdSnapshot(curBuffDescrip, &snapshot);
+
 /* A frame on one buffer or several receive buffers are both considered. */
 #if defined(FSL_FEATURE_MEMORY_HAS_ADDRESS_OFFSET) && FSL_FEATURE_MEMORY_HAS_ADDRESS_OFFSET
-            address = MEMORY_ConvertMemoryMapAddress((uint32_t)curBuffDescrip->buffer, kMEMORY_DMA2Local);
+            address = MEMORY_ConvertMemoryMapAddress((uint32_t)snapshot.buffer, kMEMORY_DMA2Local);
 #else
-            address = (uint32_t)curBuffDescrip->buffer;
+            address = (uint32_t)snapshot.buffer;
 #endif /* FSL_FEATURE_MEMORY_HAS_ADDRESS_OFFSET */
 #if defined(FSL_SDK_ENABLE_DRIVER_CACHE_CONTROL) && FSL_SDK_ENABLE_DRIVER_CACHE_CONTROL
             if (handle->rxMaintainEnable[ringId])
@@ -1734,20 +1774,20 @@ status_t ENET_ReadFrame(
 
             dest = (uint32_t)data + offset;
             /* The last buffer descriptor of a frame. */
-            if (0U != (curBuffDescrip->control & ENET_BUFFDESCRIPTOR_RX_LAST_MASK))
+            if (0U != (snapshot.control & ENET_BUFFDESCRIPTOR_RX_LAST_MASK))
             {
                 /* This is a valid frame. */
                 isLastBuff = true;
-                if (length == curBuffDescrip->length)
+                if (length == snapshot.length)
                 {
                     /* Copy the frame to user's buffer without FCS. */
-                    len = curBuffDescrip->length - offset;
+                    len = snapshot.length - offset;
                     (void)memcpy((void *)(uint32_t *)dest, (void *)(uint32_t *)address, len);
 #ifdef ENET_ENHANCEDBUFFERDESCRIPTOR_MODE
                     /* Get the timestamp if the ts isn't NULL. */
                     if (ts != NULL)
                     {
-                        *ts = curBuffDescrip->timestamp;
+                        *ts = snapshot.timestamp;
                     }
 #endif /* ENET_ENHANCEDBUFFERDESCRIPTOR_MODE */
 
@@ -1786,22 +1826,29 @@ status_t ENET_ReadFrame(
     return result;
 }
 
+static void ENET_ReleaseRxBufferDescriptor(enet_handle_t *handle, uint8_t ringId)
+{
+    enet_rx_bd_ring_t *rxBdRing                  = &handle->rxBdRing[ringId];
+    volatile enet_rx_bd_struct_t *curBuffDescrip = rxBdRing->rxBdBase + rxBdRing->rxGenIdx;
+
+    /* Clears status. */
+    curBuffDescrip->control &= ENET_BUFFDESCRIPTOR_RX_WRAP_MASK;
+    __DMB();
+    /* Sets the receive buffer descriptor with the empty flag. */
+    curBuffDescrip->control |= ENET_BUFFDESCRIPTOR_RX_EMPTY_MASK;
+    __DMB();
+
+    /* Increase current buffer descriptor to the next one. */
+    rxBdRing->rxGenIdx = ENET_IncreaseIndex(rxBdRing->rxGenIdx, rxBdRing->rxRingLen);
+}
+
 static void ENET_UpdateReadBuffers(ENET_Type *base, enet_handle_t *handle, uint8_t ringId)
 {
     assert(handle != NULL);
     assert(FSL_FEATURE_ENET_INSTANCE_QUEUEn(base) != -1);
     assert(ringId < (uint8_t)FSL_FEATURE_ENET_INSTANCE_QUEUEn(base));
 
-    enet_rx_bd_ring_t *rxBdRing                  = &handle->rxBdRing[ringId];
-    volatile enet_rx_bd_struct_t *curBuffDescrip = rxBdRing->rxBdBase + rxBdRing->rxGenIdx;
-
-    /* Clears status. */
-    curBuffDescrip->control &= ENET_BUFFDESCRIPTOR_RX_WRAP_MASK;
-    /* Sets the receive buffer descriptor with the empty flag. */
-    curBuffDescrip->control |= ENET_BUFFDESCRIPTOR_RX_EMPTY_MASK;
-
-    /* Increase current buffer descriptor to the next one. */
-    rxBdRing->rxGenIdx = ENET_IncreaseIndex(rxBdRing->rxGenIdx, rxBdRing->rxRingLen);
+    ENET_ReleaseRxBufferDescriptor(handle, ringId);
 
     ENET_ActiveReadRing(base, ringId);
 }
@@ -2157,11 +2204,14 @@ status_t ENET_GetRxBuffer(ENET_Type *base,
 
     enet_rx_bd_ring_t *rxBdRing                  = &handle->rxBdRing[ringId];
     volatile enet_rx_bd_struct_t *curBuffDescrip = rxBdRing->rxBdBase + rxBdRing->rxGenIdx;
+    enet_rx_bd_snapshot_t snapshot;
     uint32_t address;
+
+    ENET_GetRxBdSnapshot(curBuffDescrip, &snapshot);
 
     /* Check if current rx BD is under usage by certain application */
     /* Buffer owner flag, 1: owned by application, 0: owned by driver */
-    if ((curBuffDescrip->control & ENET_BUFFDESCRIPTOR_RX_SOFTOWNER1_MASK) == 0U)
+    if ((snapshot.control & ENET_BUFFDESCRIPTOR_RX_SOFTOWNER1_MASK) == 0U)
     {
         curBuffDescrip->control |= ENET_BUFFDESCRIPTOR_RX_SOFTOWNER1_MASK;
     }
@@ -2172,9 +2222,9 @@ status_t ENET_GetRxBuffer(ENET_Type *base,
 
 /* A frame on one buffer or several receive buffers are both considered. */
 #if defined(FSL_FEATURE_MEMORY_HAS_ADDRESS_OFFSET) && FSL_FEATURE_MEMORY_HAS_ADDRESS_OFFSET
-    address = MEMORY_ConvertMemoryMapAddress((uint32_t)curBuffDescrip->buffer, kMEMORY_DMA2Local);
+    address = MEMORY_ConvertMemoryMapAddress((uint32_t)snapshot.buffer, kMEMORY_DMA2Local);
 #else
-    address = (uint32_t)curBuffDescrip->buffer;
+    address = (uint32_t)snapshot.buffer;
 #endif /* FSL_FEATURE_MEMORY_HAS_ADDRESS_OFFSET */
 #if defined(FSL_SDK_ENABLE_DRIVER_CACHE_CONTROL) && FSL_SDK_ENABLE_DRIVER_CACHE_CONTROL
     if (handle->rxMaintainEnable[ringId])
@@ -2185,17 +2235,17 @@ status_t ENET_GetRxBuffer(ENET_Type *base,
 #endif /* FSL_SDK_ENABLE_DRIVER_CACHE_CONTROL */
 
     *buffer = (void *)(uint32_t *)address;
-    *length = curBuffDescrip->length;
+    *length = snapshot.length;
 
     /* The last buffer descriptor of a frame. */
-    if (0U != (curBuffDescrip->control & ENET_BUFFDESCRIPTOR_RX_LAST_MASK))
+    if (0U != (snapshot.control & ENET_BUFFDESCRIPTOR_RX_LAST_MASK))
     {
         /* This is a valid frame. */
         *isLastBuff = true;
 #ifdef ENET_ENHANCEDBUFFERDESCRIPTOR_MODE
         if (ts != NULL)
         {
-            *ts = curBuffDescrip->timestamp;
+            *ts = snapshot.timestamp;
         }
 #endif /* ENET_ENHANCEDBUFFERDESCRIPTOR_MODE */
     }
@@ -2222,6 +2272,8 @@ void ENET_ReleaseRxBuffer(ENET_Type *base, enet_handle_t *handle, void *buffer, 
     enet_rx_bd_struct_t *ownBuffDescrip   = (enet_rx_bd_struct_t *)(uint32_t)rxBdRing->rxBdBase;
     enet_rx_bd_struct_t *blockBuffDescrip = (enet_rx_bd_struct_t *)(uint32_t)rxBdRing->rxBdBase + rxBdRing->rxGenIdx;
     enet_rx_bd_struct_t tempBuffDescrip;
+    enet_rx_bd_snapshot_t ownSnapshot;
+    enet_rx_bd_snapshot_t blockSnapshot;
     uint16_t index   = rxBdRing->rxGenIdx;
     bool isReleaseBd = false;
 
@@ -2231,17 +2283,19 @@ void ENET_ReleaseRxBuffer(ENET_Type *base, enet_handle_t *handle, void *buffer, 
 
     do
     {
+        ENET_GetRxBdSnapshot((volatile enet_rx_bd_struct_t *)ownBuffDescrip, &ownSnapshot);
+
         /* Find the BD for releasing, do nothing if it's not owned by application. */
-        if (buffer == ownBuffDescrip->buffer)
+        if (buffer == ownSnapshot.buffer)
         {
-            if (0U != (ownBuffDescrip->control & ENET_BUFFDESCRIPTOR_RX_SOFTOWNER1_MASK))
+            if (0U != (ownSnapshot.control & ENET_BUFFDESCRIPTOR_RX_SOFTOWNER1_MASK))
             {
                 isReleaseBd = true;
                 break;
             }
         }
 
-        if (0U != (ownBuffDescrip->control & ENET_BUFFDESCRIPTOR_RX_WRAP_MASK))
+        if (0U != (ownSnapshot.control & ENET_BUFFDESCRIPTOR_RX_WRAP_MASK))
         {
             break;
         }
@@ -2254,11 +2308,13 @@ void ENET_ReleaseRxBuffer(ENET_Type *base, enet_handle_t *handle, void *buffer, 
          * owned by application */
         do
         {
-            if (0U != (blockBuffDescrip->control & ENET_BUFFDESCRIPTOR_RX_SOFTOWNER1_MASK))
+            ENET_GetRxBdSnapshot((volatile enet_rx_bd_struct_t *)blockBuffDescrip, &blockSnapshot);
+
+            if (0U != (blockSnapshot.control & ENET_BUFFDESCRIPTOR_RX_SOFTOWNER1_MASK))
             {
                 break;
             }
-            if (0U != (blockBuffDescrip->control & ENET_BUFFDESCRIPTOR_RX_WRAP_MASK))
+            if (0U != (blockSnapshot.control & ENET_BUFFDESCRIPTOR_RX_WRAP_MASK))
             {
                 blockBuffDescrip = (enet_rx_bd_struct_t *)(uint32_t)rxBdRing->rxBdBase;
             }
@@ -2296,31 +2352,33 @@ void ENET_ReleaseRxBuffer(ENET_Type *base, enet_handle_t *handle, void *buffer, 
 
             /* Clears status including the owner flag. */
             blockBuffDescrip->control &= ENET_BUFFDESCRIPTOR_RX_WRAP_MASK;
+            __DMB();
             /* Sets the receive buffer descriptor with the empty flag. */
             blockBuffDescrip->control |= ENET_BUFFDESCRIPTOR_RX_EMPTY_MASK;
+            __DMB();
         }
         else
         {
             /* Clears status including the owner flag. */
             ownBuffDescrip->control &= ENET_BUFFDESCRIPTOR_RX_WRAP_MASK;
+            __DMB();
             /* Sets the receive buffer descriptor with the empty flag. */
             ownBuffDescrip->control |= ENET_BUFFDESCRIPTOR_RX_EMPTY_MASK;
+            __DMB();
         }
 
         ENET_ActiveReadRing(base, ringId);
     }
 }
 
-static inline status_t ENET_GetRxFrameErr(enet_rx_bd_struct_t *rxDesc, enet_rx_frame_error_t *rxFrameError)
+static inline status_t ENET_GetRxFrameErr(const enet_rx_bd_snapshot_t *snapshot,
+                                          enet_rx_frame_error_t *rxFrameError)
 {
-    assert(rxDesc != NULL);
+    assert(snapshot != NULL);
     assert(rxFrameError != NULL);
 
     status_t result  = kStatus_Success;
-    uint16_t control = rxDesc->control;
-#ifdef ENET_ENHANCEDBUFFERDESCRIPTOR_MODE
-    uint16_t controlExtend1 = rxDesc->controlExtend1;
-#endif /* ENET_ENHANCEDBUFFERDESCRIPTOR_MODE */
+    uint16_t control = snapshot->control;
 
     union _frame_error
     {
@@ -2337,7 +2395,7 @@ static inline status_t ENET_GetRxFrameErr(enet_rx_bd_struct_t *rxDesc, enet_rx_f
         result = kStatus_ENET_RxFrameError;
     }
 #ifdef ENET_ENHANCEDBUFFERDESCRIPTOR_MODE
-    if (0U != (controlExtend1 & ENET_BUFFDESCRIPTOR_RX_EXT_ERR_MASK))
+    if (0U != (snapshot->controlExtend1 & ENET_BUFFDESCRIPTOR_RX_EXT_ERR_MASK))
     {
         result = kStatus_ENET_RxFrameError;
     }
@@ -2347,7 +2405,7 @@ static inline status_t ENET_GetRxFrameErr(enet_rx_bd_struct_t *rxDesc, enet_rx_f
     {
         error.data = control;
 #ifdef ENET_ENHANCEDBUFFERDESCRIPTOR_MODE
-        error.data |= ((uint32_t)controlExtend1 << 16U);
+        error.data |= ((uint32_t)snapshot->controlExtend1 << 16U);
 #endif /* ENET_ENHANCEDBUFFERDESCRIPTOR_MODE */
     }
 
@@ -2388,6 +2446,7 @@ status_t ENET_GetRxFrame(ENET_Type *base, enet_handle_t *handle, enet_rx_frame_s
     status_t result                              = kStatus_Success;
     enet_rx_bd_ring_t *rxBdRing                  = &handle->rxBdRing[ringId];
     volatile enet_rx_bd_struct_t *curBuffDescrip = rxBdRing->rxBdBase + rxBdRing->rxGenIdx;
+    enet_rx_bd_snapshot_t snapshot;
     void *newBuff                                = NULL;
     bool isLastBuff                              = false;
     uint16_t buffLen                             = 0;
@@ -2396,8 +2455,10 @@ status_t ENET_GetRxFrame(ENET_Type *base, enet_handle_t *handle, enet_rx_frame_s
     uint32_t address;
     void *buffer;
 
+    ENET_GetRxBdSnapshot(curBuffDescrip, &snapshot);
+
     /* Check the current buffer descriptor's empty flag. If empty means there is no frame received. */
-    if (0U != (curBuffDescrip->control & ENET_BUFFDESCRIPTOR_RX_EMPTY_MASK))
+    if (0U != (snapshot.control & ENET_BUFFDESCRIPTOR_RX_EMPTY_MASK))
     {
         result = kStatus_ENET_RxFrameEmpty;
     }
@@ -2407,10 +2468,10 @@ status_t ENET_GetRxFrame(ENET_Type *base, enet_handle_t *handle, enet_rx_frame_s
         do
         {
             /* Find the last buffer descriptor. */
-            if (0U != (curBuffDescrip->control & ENET_BUFFDESCRIPTOR_RX_LAST_MASK))
+            if (0U != (snapshot.control & ENET_BUFFDESCRIPTOR_RX_LAST_MASK))
             {
                 /* The last buffer descriptor stores the status of rhis received frame. */
-                result = ENET_GetRxFrameErr((enet_rx_bd_struct_t *)(uint32_t)curBuffDescrip, &rxFrame->rxFrameError);
+                result = ENET_GetRxFrameErr(&snapshot, &rxFrame->rxFrameError);
                 break;
             }
 
@@ -2422,7 +2483,8 @@ status_t ENET_GetRxFrame(ENET_Type *base, enet_handle_t *handle, enet_rx_frame_s
                 result = kStatus_ENET_RxFrameEmpty;
                 break;
             }
-        } while (0U == (curBuffDescrip->control & ENET_BUFFDESCRIPTOR_RX_EMPTY_MASK));
+            ENET_GetRxBdSnapshot(curBuffDescrip, &snapshot);
+        } while (0U == (snapshot.control & ENET_BUFFDESCRIPTOR_RX_EMPTY_MASK));
     }
 
     /* Drop the error frame. */
@@ -2431,20 +2493,16 @@ status_t ENET_GetRxFrame(ENET_Type *base, enet_handle_t *handle, enet_rx_frame_s
         curBuffDescrip = rxBdRing->rxBdBase + rxBdRing->rxGenIdx;
         do
         {
+            ENET_GetRxBdSnapshot(curBuffDescrip, &snapshot);
+
             /* The last buffer descriptor of a frame. */
-            if (0U != (curBuffDescrip->control & ENET_BUFFDESCRIPTOR_RX_LAST_MASK))
+            if (0U != (snapshot.control & ENET_BUFFDESCRIPTOR_RX_LAST_MASK))
             {
                 isLastBuff = true;
             }
 
-            /* Clears status including the owner flag. */
-            curBuffDescrip->control &= ENET_BUFFDESCRIPTOR_RX_WRAP_MASK;
-            /* Sets the receive buffer descriptor with the empty flag. */
-            curBuffDescrip->control |= ENET_BUFFDESCRIPTOR_RX_EMPTY_MASK;
-
-            /* Increase current buffer descriptor to the next one. */
-            rxBdRing->rxGenIdx = ENET_IncreaseIndex(rxBdRing->rxGenIdx, rxBdRing->rxRingLen);
-            curBuffDescrip     = rxBdRing->rxBdBase + rxBdRing->rxGenIdx;
+            ENET_ReleaseRxBufferDescriptor(handle, ringId);
+            curBuffDescrip = rxBdRing->rxBdBase + rxBdRing->rxGenIdx;
         } while (!isLastBuff);
 
         ENET_ActiveReadRing(base, ringId);
@@ -2465,15 +2523,17 @@ status_t ENET_GetRxFrame(ENET_Type *base, enet_handle_t *handle, enet_rx_frame_s
     index          = 0;
     do
     {
+        ENET_GetRxBdSnapshot(curBuffDescrip, &snapshot);
+
         newBuff = handle->rxBuffAlloc(base, handle->userData, ringId);
         if (newBuff != NULL)
         {
             rxBuffer = &rxFrame->rxBuffArray[index];
 
 #if defined(FSL_FEATURE_MEMORY_HAS_ADDRESS_OFFSET) && FSL_FEATURE_MEMORY_HAS_ADDRESS_OFFSET
-            address = MEMORY_ConvertMemoryMapAddress((uint32_t)curBuffDescrip->buffer, kMEMORY_DMA2Local);
+            address = MEMORY_ConvertMemoryMapAddress((uint32_t)snapshot.buffer, kMEMORY_DMA2Local);
 #else
-            address = (uint32_t)curBuffDescrip->buffer;
+            address = (uint32_t)snapshot.buffer;
 #endif /* FSL_FEATURE_MEMORY_HAS_ADDRESS_OFFSET */
 #if defined(FSL_SDK_ENABLE_DRIVER_CACHE_CONTROL) && FSL_SDK_ENABLE_DRIVER_CACHE_CONTROL
             if (handle->rxMaintainEnable[ringId])
@@ -2485,28 +2545,28 @@ status_t ENET_GetRxFrame(ENET_Type *base, enet_handle_t *handle, enet_rx_frame_s
             rxBuffer->buffer = (void *)(uint32_t *)address;
 
             /* The last buffer descriptor of a frame. */
-            if (0U != (curBuffDescrip->control & ENET_BUFFDESCRIPTOR_RX_LAST_MASK))
+            if (0U != (snapshot.control & ENET_BUFFDESCRIPTOR_RX_LAST_MASK))
             {
                 /* This is a valid frame. */
                 isLastBuff       = true;
-                rxFrame->totLen  = curBuffDescrip->length;
-                rxBuffer->length = curBuffDescrip->length - buffLen;
+                rxFrame->totLen  = snapshot.length;
+                rxBuffer->length = snapshot.length - buffLen;
 
                 rxFrame->rxAttribute.promiscuous = false;
                 if (0U != (base->RCR & ENET_RCR_PROM_MASK))
                 {
-                    if (0U != (curBuffDescrip->control & ENET_BUFFDESCRIPTOR_RX_MISS_MASK))
+                    if (0U != (snapshot.control & ENET_BUFFDESCRIPTOR_RX_MISS_MASK))
                     {
                         rxFrame->rxAttribute.promiscuous = true;
                     }
                 }
 #ifdef ENET_ENHANCEDBUFFERDESCRIPTOR_MODE
-                rxFrame->rxAttribute.timestamp = curBuffDescrip->timestamp;
+                rxFrame->rxAttribute.timestamp = snapshot.timestamp;
 #endif /* ENET_ENHANCEDBUFFERDESCRIPTOR_MODE */
             }
             else
             {
-                rxBuffer->length = curBuffDescrip->length;
+                rxBuffer->length = snapshot.length;
                 buffLen += rxBuffer->length;
             }
 
@@ -2526,16 +2586,11 @@ status_t ENET_GetRxFrame(ENET_Type *base, enet_handle_t *handle, enet_rx_frame_s
 #endif /* FSL_SDK_ENABLE_DRIVER_CACHE_CONTROL */
 
             curBuffDescrip->buffer = buffer;
-
-            /* Clears status including the owner flag. */
-            curBuffDescrip->control &= ENET_BUFFDESCRIPTOR_RX_WRAP_MASK;
-            /* Sets the receive buffer descriptor with the empty flag. */
-            curBuffDescrip->control |= ENET_BUFFDESCRIPTOR_RX_EMPTY_MASK;
+            ENET_ReleaseRxBufferDescriptor(handle, ringId);
 
             /* Increase Rx array index and the buffer descriptor address. */
             index++;
-            rxBdRing->rxGenIdx = ENET_IncreaseIndex(rxBdRing->rxGenIdx, rxBdRing->rxRingLen);
-            curBuffDescrip     = rxBdRing->rxBdBase + rxBdRing->rxGenIdx;
+            curBuffDescrip = rxBdRing->rxBdBase + rxBdRing->rxGenIdx;
         }
         else
         {
@@ -2550,20 +2605,16 @@ status_t ENET_GetRxFrame(ENET_Type *base, enet_handle_t *handle, enet_rx_frame_s
             /* Update left buffers as ready for next coming frame */
             do
             {
+                ENET_GetRxBdSnapshot(curBuffDescrip, &snapshot);
+
                 /* The last buffer descriptor of a frame. */
-                if (0U != (curBuffDescrip->control & ENET_BUFFDESCRIPTOR_RX_LAST_MASK))
+                if (0U != (snapshot.control & ENET_BUFFDESCRIPTOR_RX_LAST_MASK))
                 {
                     isLastBuff = true;
                 }
 
-                /* Clears status including the owner flag. */
-                curBuffDescrip->control &= ENET_BUFFDESCRIPTOR_RX_WRAP_MASK;
-                /* Sets the receive buffer descriptor with the empty flag. */
-                curBuffDescrip->control |= ENET_BUFFDESCRIPTOR_RX_EMPTY_MASK;
-
-                /* Increase current buffer descriptor to the next one. */
-                rxBdRing->rxGenIdx = ENET_IncreaseIndex(rxBdRing->rxGenIdx, rxBdRing->rxRingLen);
-                curBuffDescrip     = rxBdRing->rxBdBase + rxBdRing->rxGenIdx;
+                ENET_ReleaseRxBufferDescriptor(handle, ringId);
+                curBuffDescrip = rxBdRing->rxBdBase + rxBdRing->rxGenIdx;
             } while (!isLastBuff);
 
             result = kStatus_ENET_RxFrameDrop;
