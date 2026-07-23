@@ -85,6 +85,8 @@
 #define MMAC_CNT ((_NUM_MLD6_GROUP) + (_NUM_IGMP_GROUP))
 #endif
 
+#define ETHERNETIF_INPUT_FRAME_LIMIT 4U
+
 #if MMAC_CNT > 0
 struct mmac_ref_item
 {
@@ -197,12 +199,15 @@ static void ethernetif_probe_link_cyclic(void *netifArg)
 void ethernetif_input(struct netif *netif_)
 {
     struct pbuf *p;
+    uint32_t frameCount = 0U;
 
     LWIP_ASSERT("netif_ != NULL", (netif_ != NULL));
 
     /* move received packet into a new pbuf */
-    while ((p = ethernetif_linkinput(netif_)) != NULL)
+    while ((frameCount < ETHERNETIF_INPUT_FRAME_LIMIT) && ((p = ethernetif_linkinput(netif_)) != NULL))
     {
+        frameCount++;
+
         /* pass all packets to ethernet_input, which decides what packets it supports */
         if (netif_->input(p, netif_) != (err_t)ERR_OK)
         {
