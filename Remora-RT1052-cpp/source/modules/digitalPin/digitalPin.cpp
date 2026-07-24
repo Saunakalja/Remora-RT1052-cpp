@@ -23,28 +23,18 @@ void createDigitalPin()
     const char* modifier = module["Modifier"] | "None";
     int dataBit = module["Data Bit"];
 
-    int mod;
+    PinModifier mod =
+        PinModifier::None;
+
     bool inv;
 
-    if (!strcmp(modifier,"Open Drain"))
+    if (!parsePinModifier(
+            modifier,
+            mod))
     {
-        mod = OPENDRAIN;
-    }
-    else if (!strcmp(modifier,"Pull Up"))
-    {
-        mod = PULLUP;
-    }
-    else if (!strcmp(modifier,"Pull Down"))
-    {
-        mod = PULLDOWN;
-    }
-    else if (!strcmp(modifier,"Pull None"))
-    {
-        mod = PULLNONE;
-    }
-    else
-    {
-        mod = NONE;
+        printf(
+            "Error - invalid Digital Pin modifier\n");
+        return;
     }
 
     if (!strcmp(invert,"True"))
@@ -79,17 +69,27 @@ void createDigitalPin()
                 METHOD DEFINITIONS
 ************************************************************************/
 
-DigitalPin::DigitalPin(volatile uint32_t &ptrData, int mode, std::string portAndPin, int bitNumber, bool invert, int modifier) :
+DigitalPin::DigitalPin(
+    volatile uint32_t &ptrData,
+    int mode,
+    std::string portAndPin,
+    int bitNumber,
+    bool invert,
+    PinModifier modifier) :
 	ptrData(&ptrData),
 	bitNumber(bitNumber),
     invert(invert),
 	mask(0),
 	mode(mode),
-	modifier(modifier),
 	portAndPin(portAndPin),
 	pin(nullptr)
 {
-	this->pin = new Pin(this->portAndPin, this->mode);		// Input 0x0, Output 0x1
+	this->pin =
+        new Pin(
+            this->portAndPin,
+            this->mode,
+            modifier);
+
 	this->mask = uint32_t{1} << this->bitNumber;
 }
 

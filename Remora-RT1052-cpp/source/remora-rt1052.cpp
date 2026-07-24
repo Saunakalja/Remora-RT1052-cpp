@@ -1950,6 +1950,9 @@ void loadModules(void)
                 }
             }
 
+            const char* modifier =
+                "None";
+
             if (moduleObject.containsKey("Modifier"))
             {
                 JsonVariantConst modifierValue =
@@ -1964,21 +1967,56 @@ void loadModules(void)
                     return;
                 }
 
-                const char* modifier =
+                modifier =
                     modifierValue.as<const char*>();
+            }
 
-                if (strcmp(modifier,"None") &&
-                    strcmp(modifier,"Open Drain") &&
-                    strcmp(modifier,"Pull Up") &&
-                    strcmp(modifier,"Pull Down") &&
-                    strcmp(modifier,"Pull None"))
-                {
-                    printf(
-                        "Digital Pin module entry %lu modifier value is invalid\n",
-                        static_cast<unsigned long>(moduleIndex));
-                    configError = true;
-                    return;
-                }
+            PinModifier pinModifier =
+                PinModifier::None;
+
+            if (!parsePinModifier(
+                    modifier,
+                    pinModifier))
+            {
+                printf(
+                    "Digital Pin module entry %lu modifier value is invalid\n",
+                    static_cast<unsigned long>(moduleIndex));
+                configError = true;
+                return;
+            }
+
+            const int pinDirection =
+                !strcmp(mode,"Input")
+                    ? INPUT
+                    : OUTPUT;
+
+            if (!pinModifierIsCompatible(
+                    pinModifier,
+                    pinDirection))
+            {
+                printf(
+                    "Digital Pin module entry %lu pin %s mode %s does not support modifier %s\n",
+                    static_cast<unsigned long>(moduleIndex),
+                    configuredPin,
+                    mode,
+                    modifier);
+                configError = true;
+                return;
+            }
+
+            if ((pinModifier !=
+                 PinModifier::None) &&
+                !pinHasPadConfigRegister(
+                    configuredPin))
+            {
+                printf(
+                    "Digital Pin module entry %lu pin %s mode %s modifier %s has no unique pad-control register\n",
+                    static_cast<unsigned long>(moduleIndex),
+                    configuredPin,
+                    mode,
+                    modifier);
+                configError = true;
+                return;
             }
 
             if (!strcmp(mode,"Input"))

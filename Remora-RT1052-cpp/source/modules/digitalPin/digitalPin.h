@@ -21,14 +21,19 @@ class DigitalPin : public Module
 		uint32_t mask;
 
 		int mode;
-        int modifier;
 		std::string portAndPin;
 
 		Pin *pin;
 
 	public:
 
-        DigitalPin(volatile uint32_t&, int, std::string, int, bool, int);
+        DigitalPin(
+            volatile uint32_t&,
+            int,
+            std::string,
+            int,
+            bool,
+            PinModifier);
 		virtual void update(void);
 		virtual void slowUpdate(void);
 };
