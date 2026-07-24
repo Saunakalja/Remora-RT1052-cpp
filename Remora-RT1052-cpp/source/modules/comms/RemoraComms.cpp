@@ -74,6 +74,25 @@ void RemoraComms::dataReceived()
 }
 
 
+void RemoraComms::resetCommunication()
+{
+	const uint32_t primask =
+		__get_PRIMASK();
+
+	__disable_irq();
+
+	this->data = false;
+	this->status = false;
+	this->noDataCount = 0;
+
+	__set_PRIMASK(
+		primask);
+
+	this->CommsPin->set(
+		!this->status);
+}
+
+
 bool RemoraComms::getStatus()
 {
 	const uint32_t primask =

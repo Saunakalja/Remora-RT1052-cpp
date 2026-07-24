@@ -27,6 +27,7 @@ class RemoraComms : public Module
 
 	virtual void update(void);
 	void dataReceived();
+	void resetCommunication();
 	bool getStatus();
 };
 

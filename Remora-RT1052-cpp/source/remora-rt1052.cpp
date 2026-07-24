@@ -72,6 +72,10 @@ along with this program; If not, see <http://www.gnu.org/licenses/>.
 #include "modules/nvmpg/nvmpg.h"
 
 
+bool controlSessionHandoffPending(void);
+void controlSessionHandoffComplete(void);
+
+
 // state machine
 enum State {
     ST_SETUP = 0,
@@ -2660,6 +2664,69 @@ int main(void)
      		  }
 
         EthernetTasks();
+
+	if (controlSessionHandoffPending() &&
+		threadsRunning)
+	{
+		if (hasBaseThread)
+		{
+			baseThread->stopThread();
+		}
+
+		if (hasServoThread)
+		{
+			servoThread->stopThread();
+		}
+
+		threadsRunning = false;
+
+		if (hasDMAthread && DMAthreadRunning)
+		{
+			dmaThread->stopThread();
+			DMAthreadRunning = false;
+		}
+
+		int remaining =
+			sizeof(rxData.rxBuffer);
+
+		while (remaining-- > 0)
+		{
+			rxData.rxBuffer[remaining] = 0;
+		}
+
+		comms->resetCommunication();
+
+		if (hasBaseThread)
+		{
+			baseThread->run();
+		}
+
+		if (hasServoThread)
+		{
+			servoThread->run();
+		}
+
+		if (hasDMAthread)
+		{
+			dmaThread->run();
+		}
+
+		if (hasBaseThread)
+		{
+			baseThread->startThread();
+		}
+
+		if (hasServoThread)
+		{
+			servoThread->startThread();
+		}
+
+		threadsRunning = true;
+		currentState = ST_IDLE;
+		prevState = ST_RESET;
+
+		controlSessionHandoffComplete();
+	}
 
 	DMA::CompletionResult dmaCompletion =
 		dmaThread->DMAptr->takeCompletion();

@@ -86,49 +86,6 @@ typedef struct {
 
 static data_t *data;
 
-
-#pragma pack(push, 1)
-
-typedef union
-{
-  // this allow structured access to the outgoing data without having to move it
-  // this is the same structure as the Remora rxData structure
-  struct
-  {
-    uint8_t txBuffer[BUFFER_SIZE];
-  };
-  struct
-  {
-	int32_t header;
-    int32_t jointFreqCmd[JOINTS];
-    float 	setPoint[VARIABLES];
-	uint8_t jointEnable;
-	uint32_t outputs;
-    uint8_t spare0;
-  };
-} txData_t;
-
-
-typedef union
-{
-  // this allow structured access to the incoming data without having to move it
-  // this is the same structure as the Remora txData structure
-  struct
-  {
-    uint8_t rxBuffer[BUFFER_SIZE];
-  };
-  struct
-  {
-    int32_t header;
-    int32_t jointFeedback[JOINTS];
-    float 	processVariable[VARIABLES];
-    uint32_t inputs;
-	uint16_t NVMPGinputs;
-  };
-} rxData_t;
-
-#pragma pack(pop)
-
 static txData_t txData;
 static rxData_t rxData;
 
@@ -159,6 +116,7 @@ RTAPI_MP_INT(PRU_base_freq, "PRU base thread frequency");
 #define RECV_TIMEOUT_US 10
 #define READ_PCK_DELAY_NS 10000
 #define COMMUNICATION_CYCLE_BUDGET_NS 500000LL
+#define CONTROL_ACTIVATE_RETRY_LIMIT 3U
 #define MIN_POS_SCALE 1e-20
 
 static int udpSocket = -1;
@@ -167,6 +125,32 @@ static uint8_t writeErrCount;
 static bool enableWasActive = false;
 static long long communicationCycleDeadline;
 static bool communicationCycleDeadlineActive;
+typedef enum
+{
+	CONTROL_SESSION_OPEN,
+	CONTROL_SESSION_ACTIVATE,
+	CONTROL_SESSION_ESTABLISHED
+} controlSessionState_t;
+
+typedef enum
+{
+	CONTROL_RESPONSE_ENVELOPE_ONLY,
+	CONTROL_RESPONSE_NONZERO_CHALLENGE,
+	CONTROL_RESPONSE_EXACT_CHALLENGE
+} controlResponseValidation_t;
+
+static controlSessionState_t controlSessionState;
+static uint32_t controlSessionId;
+static uint32_t controlSessionProposal;
+static uint32_t establishmentSequence;
+static uint32_t controlChallenge;
+static uint32_t controlSessionToken;
+static uint32_t nextControlSessionId;
+static uint32_t nextEstablishmentSequence;
+static uint32_t nextReadSequence;
+static uint32_t nextWriteSequence;
+static bool controlSessionNeedsRead;
+static uint8_t establishmentRetryCount;
 struct sockaddr_in dstAddr, srcAddr;
 struct hostent *server;
 static const char *dstAddress = "10.10.10.10";
@@ -185,11 +169,27 @@ static bool sanitize_pos_scale(hal_float_t *scale);
 static int32_t frequency_to_int32(double frequency);
 static float setpoint_to_protocol_float(hal_float_t setpoint);
 static long long create_communication_cycle_deadline(void);
-static void pru_transfer(
-	int txSize,
-	int rxSize,
-	uint8_t *errorCount,
+static void initialize_control_session(void);
+static void begin_control_session_attempt(void);
+static void establish_control_session(
 	long long responseDeadline);
+static void prepare_control_request(
+	controlEnvelope_t *envelope,
+	uint32_t kind,
+	uint32_t *nextSequence);
+static bool pru_transfer(
+	const uint8_t *requestBuffer,
+	int txSize,
+	uint8_t *responseBuffer,
+	int rxSize,
+	uint32_t expectedKind,
+	controlResponseValidation_t responseValidation,
+	uint32_t expectedChallenge,
+	uint32_t expectedSessionToken,
+	long long responseDeadline);
+static void record_control_transfer_result(
+	bool validResponse,
+	uint8_t *errorCount);
 static CONTROL parse_ctrl_type(const char *ctrl);
 
 
@@ -253,6 +253,8 @@ int rtapi_app_main(void)
 		hal_exit(comp_id);
 		return -1;
 	}
+
+	initialize_control_session();
 
 	// export spiPRU SPI enable and status bits
 	retval = hal_pin_bit_newf(HAL_IN, &(data->enable),
@@ -1042,39 +1044,287 @@ static long long create_communication_cycle_deadline(void)
 	return currentTime + COMMUNICATION_CYCLE_BUDGET_NS;
 }
 
+static void initialize_control_session(void)
+{
+	long long signedStartupTime = rtapi_get_time();
+	uint64_t startupTime =
+		(signedStartupTime > 0) ?
+			(uint64_t)signedStartupTime :
+			UINT64_C(1);
+	uint32_t lowStartupTime =
+		(uint32_t)startupTime;
+	uint32_t highStartupTime =
+		(uint32_t)(
+			startupTime >> 32U);
+
+	nextControlSessionId =
+		lowStartupTime ^
+		(highStartupTime * UINT32_C(0x9e3779b9));
+	nextEstablishmentSequence =
+		highStartupTime ^
+		(lowStartupTime * UINT32_C(0x85ebca6b));
+
+	if (nextControlSessionId == 0U)
+	{
+		nextControlSessionId = 1U;
+	}
+
+	if (nextEstablishmentSequence == 0U)
+	{
+		nextEstablishmentSequence = 1U;
+	}
+
+	begin_control_session_attempt();
+}
+
+static uint32_t advance_nonzero_control_value(
+	uint32_t value)
+{
+	return
+		(value == UINT32_MAX) ?
+			1U :
+			value + 1U;
+}
+
+static uint32_t control_sequence_seed(
+	uint32_t sessionId,
+	uint32_t directionOffset)
+{
+	const uint64_t nonzeroRange =
+		(uint64_t)UINT32_MAX;
+	const uint64_t zeroBasedSeed =
+		(uint64_t)(sessionId - 1U) +
+		(uint64_t)directionOffset;
+	const uint64_t wrappedSeed =
+		(zeroBasedSeed >= nonzeroRange) ?
+			zeroBasedSeed - nonzeroRange :
+			zeroBasedSeed;
+
+	return (uint32_t)wrappedSeed +
+		1U;
+}
+
+static void begin_control_session_attempt(void)
+{
+	controlSessionProposal =
+		nextControlSessionId;
+	establishmentSequence =
+		nextEstablishmentSequence;
+	nextControlSessionId =
+		advance_nonzero_control_value(
+			nextControlSessionId);
+	nextEstablishmentSequence =
+		advance_nonzero_control_value(
+			nextEstablishmentSequence);
+	controlChallenge = 0U;
+	controlSessionToken = 0U;
+	controlSessionId = 0U;
+	nextReadSequence = 0U;
+	nextWriteSequence = 0U;
+	controlSessionNeedsRead = false;
+	establishmentRetryCount = 0U;
+	controlSessionState =
+		CONTROL_SESSION_OPEN;
+}
+
+static void establish_control_session(
+	long long responseDeadline)
+{
+	controlEstablishment_t request = {0};
+	controlEstablishment_t response = {0};
+	uint32_t expectedKind;
+	const bool activating =
+		controlSessionState ==
+			CONTROL_SESSION_ACTIVATE;
+
+	request.envelope.protocolVersion =
+		CONTROL_PROTOCOL_VERSION;
+	request.envelope.sessionId =
+		controlSessionProposal;
+	request.envelope.sequence =
+		establishmentSequence;
+
+	if (controlSessionState == CONTROL_SESSION_OPEN)
+	{
+		request.envelope.kind =
+			CONTROL_KIND_OPEN;
+		request.challenge = 0U;
+		request.sessionToken = 0U;
+		expectedKind =
+			CONTROL_KIND_CHALLENGE;
+	}
+	else
+	{
+		request.envelope.kind =
+			CONTROL_KIND_ACTIVATE;
+		request.challenge =
+			controlChallenge;
+		request.sessionToken =
+			controlSessionToken;
+		expectedKind =
+			CONTROL_KIND_ESTABLISHED;
+	}
+
+	bool validResponse =
+		pru_transfer(
+			(const uint8_t *)&request,
+			CONTROL_ESTABLISHMENT_SIZE,
+			(uint8_t *)&response,
+			CONTROL_ESTABLISHMENT_SIZE,
+			expectedKind,
+			(controlSessionState ==
+			 CONTROL_SESSION_OPEN) ?
+				CONTROL_RESPONSE_NONZERO_CHALLENGE :
+				CONTROL_RESPONSE_EXACT_CHALLENGE,
+			controlChallenge,
+			controlSessionToken,
+			responseDeadline);
+
+	record_control_transfer_result(
+		validResponse,
+		&readErrCount);
+
+	if (!validResponse)
+	{
+		if (activating)
+		{
+			if (establishmentRetryCount <
+				CONTROL_ACTIVATE_RETRY_LIMIT)
+			{
+				establishmentRetryCount++;
+			}
+
+			if (establishmentRetryCount >=
+				CONTROL_ACTIVATE_RETRY_LIMIT)
+			{
+				begin_control_session_attempt();
+			}
+		}
+
+		return;
+	}
+
+	establishmentRetryCount = 0U;
+
+	if (controlSessionState ==
+		CONTROL_SESSION_OPEN)
+	{
+		controlChallenge =
+			response.challenge;
+		controlSessionToken =
+			response.sessionToken;
+		controlSessionState =
+			CONTROL_SESSION_ACTIVATE;
+		return;
+	}
+
+	controlSessionId =
+		controlSessionToken;
+	nextReadSequence =
+		control_sequence_seed(
+			controlSessionId,
+			UINT32_C(0x72656164));
+	nextWriteSequence =
+		control_sequence_seed(
+			controlSessionId,
+			UINT32_C(0x77726974));
+	controlSessionNeedsRead = true;
+	controlSessionState =
+		CONTROL_SESSION_ESTABLISHED;
+}
+
+static void prepare_control_request(
+	controlEnvelope_t *envelope,
+	uint32_t kind,
+	uint32_t *nextSequence)
+{
+	uint32_t sequence = *nextSequence;
+
+	if (sequence == 0U)
+	{
+		sequence = 1U;
+	}
+
+	envelope->protocolVersion =
+		CONTROL_PROTOCOL_VERSION;
+	envelope->sessionId =
+		controlSessionId;
+	envelope->sequence =
+		sequence;
+	envelope->kind =
+		kind;
+
+	*nextSequence =
+		(sequence == UINT32_MAX) ?
+			1U :
+			sequence + 1U;
+}
+
 
 void pru_read()
 {
-	int i, ret;
+	int i;
 	double curr_pos;
 	long long responseDeadline;
+	bool resetRising =
+		*(data->reset) &&
+		!data->resetOld;
 
 	communicationCycleDeadline =
 		create_communication_cycle_deadline();
 	communicationCycleDeadlineActive = true;
 	responseDeadline = communicationCycleDeadline;
-
-	// Data header
-	txData.header = PRU_READ;
 	
 	if (*(data->enable))
 	{
-		if( (*(data->reset) && !(data->resetOld)) || *(data->status) )
+		if (resetRising &&
+			!*(data->status) &&
+			(controlSessionState ==
+			 CONTROL_SESSION_ESTABLISHED))
+		{
+			begin_control_session_attempt();
+		}
+
+		if (controlSessionState !=
+			CONTROL_SESSION_ESTABLISHED)
+		{
+			establish_control_session(
+				responseDeadline);
+		}
+		else if (resetRising ||
+				 *(data->status) ||
+				 controlSessionNeedsRead)
 		{
 			// reset rising edge detected, try transfer and reset OR PRU running
+
+			prepare_control_request(
+				&txData.envelope,
+				CONTROL_KIND_READ,
+				&nextReadSequence);
 			
 			// Transfer to and from the PRU
-			pru_transfer(
-				sizeof(txData.header),
-				BUFFER_SIZE,
-				&readErrCount,
+			const bool validResponse =
+				pru_transfer(
+				txData.txBuffer,
+				CONTROL_READ_PACKET_SIZE,
+				rxData.rxBuffer,
+				CONTROL_DATA_PACKET_SIZE,
+				CONTROL_KIND_DATA,
+				CONTROL_RESPONSE_ENVELOPE_ONLY,
+				0U,
+				0U,
 				responseDeadline);
+
+			record_control_transfer_result(
+				validResponse,
+				&readErrCount);
 			
-			switch (rxData.header)		// only process valid SPI payloads. This rejects bad payloads
+			switch (rxData.envelope.kind)		// only process valid SPI payloads. This rejects bad payloads
 			{
-				case PRU_DATA:
+				case CONTROL_KIND_DATA:
 					// we have received a GOOD payload from the PRU
 					*(data->status) = 1;
+					controlSessionNeedsRead = false;
 
 					for (i = 0; i < JOINTS; i++)
 					{
@@ -1144,7 +1394,7 @@ void pru_read()
 					
 					break;
 				
-				case PRU_ACKNOWLEDGE:
+				case CONTROL_KIND_ACKNOWLEDGE:
 					// we've dropped a packet somewhere but comms are still up
 					break;
 					
@@ -1161,7 +1411,9 @@ void pru_read()
 				default:
 					// we have received a BAD payload from the PRU
 					*(data->status) = 0;
-					rtapi_print("Bad payload = %x\n", rxData.header);
+					rtapi_print(
+						"Bad payload = %x\n",
+						rxData.envelope.kind);
 					break;
 			}
 		}
@@ -1177,7 +1429,7 @@ void pru_read()
 
 static void pru_write(void *arg, long period)
 {
-	int i, ret;
+	int i;
 	bool enableActive = *(data->enable);
 	bool sendSafeStop = enableWasActive && !enableActive;
 	long long responseDeadline;
@@ -1195,9 +1447,6 @@ static void pru_write(void *arg, long period)
 	responseDeadline = communicationCycleDeadline;
 
 	enableWasActive = enableActive;
-
-	// Data header
-	txData.header = PRU_WRITE;
 
 	// Joint frequency commands
 	for (i = 0; i < JOINTS; i++)
@@ -1248,32 +1497,49 @@ static void pru_write(void *arg, long period)
 			txData.txBuffer,
 			0,
 			sizeof(txData.txBuffer));
-
-		txData.header = PRU_WRITE;
 	}
 
-	if (*(data->status) || sendSafeStop)
+	if ((*(data->status) || sendSafeStop) &&
+		(controlSessionState ==
+		 CONTROL_SESSION_ESTABLISHED))
 	{
+		prepare_control_request(
+			&txData.envelope,
+			CONTROL_KIND_WRITE,
+			&nextWriteSequence);
+
 		// Transfer to and from the PRU
-		pru_transfer(
-			BUFFER_SIZE,
-			sizeof(rxData.header),
-			&writeErrCount,
+		const bool validResponse =
+			pru_transfer(
+			txData.txBuffer,
+			CONTROL_WRITE_PACKET_SIZE,
+			rxData.rxBuffer,
+			CONTROL_ACK_PACKET_SIZE,
+			CONTROL_KIND_ACKNOWLEDGE,
+			CONTROL_RESPONSE_ENVELOPE_ONLY,
+			0U,
+			0U,
 			responseDeadline);
+
+		record_control_transfer_result(
+			validResponse,
+			&writeErrCount);
 		
-		switch (rxData.header)
+		switch (rxData.envelope.kind)
 		{
-			case PRU_DATA:
+			case CONTROL_KIND_DATA:
 				// we've dropped a packet somewhere but comms are still up
 				break;
 			
-			case PRU_ACKNOWLEDGE:
+			case CONTROL_KIND_ACKNOWLEDGE:
 				// this is the response we expect
 				break;
 				
 			case PRU_ERR:
 				// there was a write error
-				rtapi_print("Data write error: %x\n",rxData.header);
+				rtapi_print(
+					"Data write error: %x\n",
+					rxData.envelope.kind);
 				break;
 			
 			case PRU_ESTOP:
@@ -1285,7 +1551,9 @@ static void pru_write(void *arg, long period)
 			default:
 				// we have received a BAD payload from the PRU
 				*(data->status) = 0;
-				rtapi_print("Bad payload = %x\n", rxData.header);
+				rtapi_print(
+					"Bad payload = %x\n",
+					rxData.envelope.kind);
 				break;
 		}	
 	}
@@ -1294,31 +1562,46 @@ static void pru_write(void *arg, long period)
 }
 
 
-void pru_transfer(
+static bool pru_transfer(
+	const uint8_t *requestBuffer,
 	int txSize,
+	uint8_t *responseBuffer,
 	int rxSize,
-	uint8_t *errorCount,
+	uint32_t expectedKind,
+	controlResponseValidation_t responseValidation,
+	uint32_t expectedChallenge,
+	uint32_t expectedSessionToken,
 	long long responseDeadline)
 {
 	int ret;
 	long long currentTime;
-	uint8_t receiveBuffer[BUFFER_SIZE];
+	uint8_t receiveBuffer[CONTROL_DATA_PACKET_SIZE];
 	bool validResponse = false;
-	int32_t expectedHeader = PRU_ERR;
+	controlEnvelope_t expectedEnvelope;
+	controlEnvelope_t errorEnvelope = {0};
 
-	if (txData.header == PRU_READ)
-	{
-		expectedHeader = PRU_DATA;
-	}
-	else if (txData.header == PRU_WRITE)
-	{
-		expectedHeader = PRU_ACKNOWLEDGE;
-	}
+	memcpy(
+		&expectedEnvelope,
+		requestBuffer,
+		sizeof(expectedEnvelope));
 
 	// Send datagram
-	ret = send(udpSocket, txData.txBuffer, txSize, 0);
+	ret = send(
+		udpSocket,
+		requestBuffer,
+		txSize,
+		0);
 
-	rxData.header = PRU_ERR;
+	memset(
+		responseBuffer,
+		0,
+		rxSize);
+	errorEnvelope.kind =
+		(uint32_t)PRU_ERR;
+	memcpy(
+		responseBuffer,
+		&errorEnvelope,
+		sizeof(errorEnvelope));
 
 	if (ret == txSize)
 	{
@@ -1329,22 +1612,64 @@ void pru_transfer(
 	        ret = recv(udpSocket, receiveBuffer, rxSize, MSG_TRUNC);
 	        if (ret == rxSize)
 	        {
-		        int32_t receivedHeader;
+		        controlEnvelope_t receivedEnvelope;
 
 		        memcpy(
-			        &receivedHeader,
+			        &receivedEnvelope,
 			        receiveBuffer,
-			        sizeof(receivedHeader));
+			        sizeof(receivedEnvelope));
 
-		        if (receivedHeader == expectedHeader)
+		        if ((receivedEnvelope.protocolVersion ==
+			         expectedEnvelope.protocolVersion) &&
+			        (receivedEnvelope.sessionId ==
+			         expectedEnvelope.sessionId) &&
+			        (receivedEnvelope.sequence ==
+			         expectedEnvelope.sequence) &&
+			        (receivedEnvelope.kind ==
+			         expectedKind))
 		        {
-			        memcpy(
-				        rxData.rxBuffer,
-				        receiveBuffer,
-				        rxSize);
+			        bool responseContentValid = true;
 
-			        validResponse = true;
-			        break;
+			        if (responseValidation !=
+				        CONTROL_RESPONSE_ENVELOPE_ONLY)
+			        {
+				        controlEstablishment_t
+					        establishmentResponse;
+
+				        memcpy(
+					        &establishmentResponse,
+					        receiveBuffer,
+					        sizeof(establishmentResponse));
+
+				        if (responseValidation ==
+					        CONTROL_RESPONSE_NONZERO_CHALLENGE)
+				        {
+					        responseContentValid =
+						        (establishmentResponse.challenge !=
+						         0U) &&
+						        (establishmentResponse.sessionToken !=
+						         0U);
+				        }
+				        else
+				        {
+					        responseContentValid =
+						        (establishmentResponse.challenge ==
+						         expectedChallenge) &&
+						        (establishmentResponse.sessionToken ==
+						         expectedSessionToken);
+				        }
+			        }
+
+			        if (responseContentValid)
+			        {
+				        memcpy(
+					        responseBuffer,
+					        receiveBuffer,
+					        rxSize);
+
+				        validResponse = true;
+				        break;
+			        }
 		        }
 	        }
 	        if(ret < 0) rtapi_delay(READ_PCK_DELAY_NS);
@@ -1356,18 +1681,22 @@ void pru_transfer(
 		ret = -1;
 	}
 
+	return validResponse;
+}
+
+static void record_control_transfer_result(
+	bool validResponse,
+	uint8_t *errorCount)
+{
 	if (validResponse)
 	{
 		*errorCount = 0U;
+		return;
 	}
-	else
-	{
-		rxData.header = PRU_ERR;
 
-		if (*errorCount < 3U)
-		{
-			(*errorCount)++;
-		}
+	if (*errorCount < 3U)
+	{
+		(*errorCount)++;
 	}
 	
 	if (*errorCount > 2U)
