@@ -1229,13 +1229,16 @@ static void pru_write(void *arg, long period)
 	// Outputs
 	for (i = 0; i < DIGITAL_OUTPUTS; i++)
 	{
+		const uint32_t outputMask =
+			UINT32_C(1) << i;
+
 		if (*(data->outputs[i]) == 1)
 		{
-			txData.outputs |= (1 << i);		// output is high
+			txData.outputs |= outputMask;		// output is high
 		}
 		else
 		{
-			txData.outputs &= ~(1 << i);	// output is low
+			txData.outputs &= ~outputMask;	// output is low
 		}
 	}
 
