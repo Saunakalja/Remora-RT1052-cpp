@@ -1114,7 +1114,10 @@ void pru_read()
 					// Inputs
 					for (i = 0; i < DIGITAL_INPUTS; i++)
 					{
-						if ((rxData.inputs & (1 << i)) != 0)
+						const uint32_t inputMask =
+							UINT32_C(1) << i;
+
+						if ((rxData.inputs & inputMask) != UINT32_C(0))
 						{
 							*(data->inputs[i]) = 1; 		// input is high
 							*(data->inputs[i+DIGITAL_INPUTS]) = 0; 		// inverted
