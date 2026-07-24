@@ -176,7 +176,7 @@ static int UDP_init(void);
 static void UDP_close(void);
 
 static void update_freq(void *arg, long period);
-static void pru_write();
+static void pru_write(void *arg, long period);
 static void pru_read();
 static long long create_communication_cycle_deadline(void);
 static void pru_transfer(
@@ -407,8 +407,8 @@ This is throwing errors from axis.py for some reason...
 	}
 
 	rtapi_snprintf(name, sizeof(name), "%s.write", prefix);
-	/* no FP operations */
-	retval = hal_export_funct(name, pru_write, 0, 0, 0, comp_id);
+	/* uses FP operations */
+	retval = hal_export_funct(name, pru_write, 0, 1, 0, comp_id);
 	if (retval < 0) {
 		rtapi_print_msg(RTAPI_MSG_ERR,
 		        "%s: ERROR: write function export failed\n", modname);
@@ -872,12 +872,15 @@ void pru_read()
 }
 
 
-void pru_write()
+static void pru_write(void *arg, long period)
 {
 	int i, ret;
 	bool enableActive = *(data->enable);
 	bool sendSafeStop = enableWasActive && !enableActive;
 	long long responseDeadline;
+
+	(void)arg;
+	(void)period;
 
 	if (!communicationCycleDeadlineActive)
 	{
