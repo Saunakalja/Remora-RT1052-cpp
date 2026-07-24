@@ -27,6 +27,8 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <string.h>
+#include <float.h>
+#include <stdint.h>
 #include <limits.h>
 
 #include <math.h>
@@ -71,8 +73,8 @@ typedef struct {
 	hal_float_t		*deadband[JOINTS];
 	float 			old_pos_cmd[JOINTS];		// previous position command (counts)
 	float 			old_pos_cmd_raw[JOINTS];	// previous position command (counts)
-	float 			old_scale[JOINTS];			// stored scale value
-	float 			scale_recip[JOINTS];		// reciprocal value used for scaling
+	hal_float_t		old_scale[JOINTS];			// stored scale value
+	hal_float_t		scale_recip[JOINTS];		// reciprocal value used for scaling
 	float			prev_cmd[JOINTS];
 	float			cmd_d[JOINTS];				// command derivative
 	hal_float_t 	*setPoint[VARIABLES];
@@ -157,6 +159,7 @@ RTAPI_MP_INT(PRU_base_freq, "PRU base thread frequency");
 #define RECV_TIMEOUT_US 10
 #define READ_PCK_DELAY_NS 10000
 #define COMMUNICATION_CYCLE_BUDGET_NS 500000LL
+#define MIN_POS_SCALE 1e-20
 
 static int udpSocket = -1;
 static uint8_t readErrCount;
@@ -178,6 +181,9 @@ static void UDP_close(void);
 static void update_freq(void *arg, long period);
 static void pru_write(void *arg, long period);
 static void pru_read();
+static bool sanitize_pos_scale(hal_float_t *scale);
+static int32_t frequency_to_int32(double frequency);
+static float setpoint_to_protocol_float(hal_float_t setpoint);
 static long long create_communication_cycle_deadline(void);
 static void pru_transfer(
 	int txSize,
@@ -316,6 +322,9 @@ This is throwing errors from axis.py for some reason...
 		        comp_id, "%s.joint.%01d.scale", prefix, n);
 		if (retval < 0) goto error;
 		data->pos_scale[n] = 1.0;
+		data->old_scale[n] = data->pos_scale[n];
+		data->scale_recip[n] =
+			(1.0 / STEP_MASK) / data->pos_scale[n];
 
 		retval = hal_pin_s32_newf(HAL_OUT, &(data->count[n]),
 		        comp_id, "%s.joint.%01d.counts", prefix, n);
@@ -544,49 +553,174 @@ int UDP_init(void)
 	return 0;
 }
 
+
+static bool sanitize_pos_scale(hal_float_t *scale)
+{
+	if (!isfinite(*scale) || (fabs(*scale) < MIN_POS_SCALE))
+	{
+		*scale = 1.0;
+		return false;
+	}
+
+	return true;
+}
+
+
+static int32_t frequency_to_int32(double frequency)
+{
+	if (!isfinite(frequency))
+	{
+		return 0;
+	}
+
+	if (frequency >= (double)INT32_MAX)
+	{
+		return INT32_MAX;
+	}
+
+	if (frequency <= (double)INT32_MIN)
+	{
+		return INT32_MIN;
+	}
+
+	return (int32_t)frequency;
+}
+
+
+static float setpoint_to_protocol_float(hal_float_t setpoint)
+{
+	if (!isfinite(setpoint) ||
+		(setpoint > (hal_float_t)FLT_MAX) ||
+		(setpoint < (hal_float_t)-FLT_MAX))
+	{
+		return 0.0F;
+	}
+
+	return (float)setpoint;
+}
+
+
 void update_freq(void *arg, long period)
 {
 	int i;
 	data_t *data = (data_t *)arg;
-	double max_ac, vel_cmd, dv, new_vel, max_freq, desired_freq;
-		   
-	double error, command, feedback;
-	double periodfp, periodrecip;
-	float pgain, ff1gain, deadband;
+	double periodfp;
+	double periodrecip = 0.0;
+	bool timingValid;
 
 	// precalculate timing constants
-    periodfp = period * 0.000000001;
-    periodrecip = 1.0 / periodfp;
+	periodfp = (double)period * 0.000000001;
+	timingValid = isfinite(periodfp) && (periodfp > 0.0);
 
-    // calc constants related to the period of this function (LinuxCNC SERVO_THREAD)
-    // only recalc constants if period changes
-    if (period != old_dtns) 			// Note!! period = LinuxCNC SERVO_PERIOD
+	if (timingValid)
+	{
+		periodrecip = 1.0 / periodfp;
+		timingValid = isfinite(periodrecip);
+	}
+
+	// calc constants related to the period of this function (LinuxCNC SERVO_THREAD)
+	// only recalc constants if period changes
+	if (period != old_dtns) 			// Note!! period = LinuxCNC SERVO_PERIOD
 	{
 		old_dtns = period;				// get ready to detect future period changes
-		dt = period * 0.000000001; 		// dt is the period of this thread, used for the position loop
-		recip_dt = 1.0 / dt;			// calc the reciprocal once here, to avoid multiple divides later
-    }
+		dt = timingValid ? periodfp : 0.0;
+		recip_dt = timingValid ? periodrecip : 0.0;
+	}
 
-    // loop through generators
+	// loop through generators
 	for (i = 0; i < JOINTS; i++)
 	{
-		// check for scale change
-		if (data->pos_scale[i] != data->old_scale[i])
+		bool numericValid = timingValid;
+		bool scaleStateValid;
+		bool commandRepresentable = true;
+		double scale;
+		double scaleMagnitude;
+		double reciprocal;
+		double max_ac;
+		double vel_cmd = 0.0;
+		double dv = 0.0;
+		double new_vel = 0.0;
+		double max_freq = (double)PRU_base_freq;
+		double desired_freq;
+		double desired_accel;
+		double error = 0.0;
+		double command = 0.0;
+		double feedback = 0.0;
+		double commandDerivative = 0.0;
+		double pgain = 1.0;
+		double ff1gain = 1.0;
+		double deadband = 0.0;
+		double priorFrequency = (double)data->freq[i];
+		double configuredMaxVelocity = data->maxvel[i];
+		double configuredMaxAcceleration = data->maxaccel[i];
+
+		if (!sanitize_pos_scale(&data->pos_scale[i]))
 		{
-			data->old_scale[i] = data->pos_scale[i];		// get ready to detect future scale changes
-			// scale must not be 0
-			if ((data->pos_scale[i] < 1e-20) && (data->pos_scale[i] > -1e-20))	// validate the new scale value
-				data->pos_scale[i] = 1.0;										// value too small, divide by zero is a bad thing
-				// we will need the reciprocal, and the accum is fixed point with
-				//fractional bits, so we precalc some stuff
-			data->scale_recip[i] = (1.0 / STEP_MASK) / data->pos_scale[i];
+			numericValid = false;
+		}
+
+		scale = data->pos_scale[i];
+		scaleMagnitude = fabs(scale);
+		scaleStateValid =
+			isfinite(data->old_scale[i]) &&
+			(fabs(data->old_scale[i]) >= MIN_POS_SCALE) &&
+			isfinite(data->scale_recip[i]);
+
+		if (!scaleStateValid)
+		{
+			numericValid = false;
+		}
+
+		// check for scale change
+		if (!scaleStateValid || (scale != data->old_scale[i]))
+		{
+			reciprocal = (1.0 / STEP_MASK) / scale;
+
+			if (!isfinite(reciprocal))
+			{
+				reciprocal = 0.0;
+				numericValid = false;
+			}
+
+			data->old_scale[i] = scale;
+			data->scale_recip[i] = reciprocal;
+		}
+
+		if (!isfinite(priorFrequency))
+		{
+			priorFrequency = 0.0;
+			data->freq[i] = 0.0F;
+			numericValid = false;
+		}
+
+		if (!isfinite(data->prev_cmd[i]))
+		{
+			data->prev_cmd[i] = 0.0F;
+			numericValid = false;
+		}
+
+		if (!isfinite(data->cmd_d[i]))
+		{
+			data->cmd_d[i] = 0.0F;
+			numericValid = false;
+		}
+
+		if (!isfinite(configuredMaxVelocity))
+		{
+			configuredMaxVelocity = 0.0;
+			data->maxvel[i] = 0.0;
+			numericValid = false;
 		}
 
 		// calculate frequency limit
-		max_freq = PRU_base_freq;
+		if (!isfinite(max_freq) || (max_freq < 0.0))
+		{
+			max_freq = 0.0;
+			numericValid = false;
+		}
 
 		// check for user specified frequency limit parameter
-		if (data->maxvel[i] <= 0.0)
+		if (configuredMaxVelocity <= 0.0)
 		{
 			// set to zero if negative
 			data->maxvel[i] = 0.0;
@@ -594,26 +728,52 @@ void update_freq(void *arg, long period)
 		else
 		{
 			// parameter is non-zero, compare to max_freq
-			desired_freq = data->maxvel[i] * fabs(data->pos_scale[i]);
+			desired_freq =
+				configuredMaxVelocity * scaleMagnitude;
 
-			if (desired_freq > max_freq)
+			if (!isfinite(desired_freq))
+			{
+				max_freq = 0.0;
+				numericValid = false;
+			}
+			else if (desired_freq > max_freq)
 			{
 				// parameter is too high, limit it
-				data->maxvel[i] = max_freq / fabs(data->pos_scale[i]);
+				data->maxvel[i] =
+					max_freq / scaleMagnitude;
 			}
 			else
 			{
 				// lower max_freq to match parameter
-				max_freq = data->maxvel[i] * fabs(data->pos_scale[i]);
+				max_freq = desired_freq;
 			}
+		}
+
+		if (!isfinite(max_freq))
+		{
+			max_freq = 0.0;
+			numericValid = false;
 		}
 		
 		/* set internal accel limit to its absolute max, which is
 		zero to full speed in one thread period */
 		max_ac = max_freq * recip_dt;
+
+		if (!isfinite(max_ac))
+		{
+			max_ac = 0.0;
+			numericValid = false;
+		}
+
+		if (!isfinite(configuredMaxAcceleration))
+		{
+			configuredMaxAcceleration = 0.0;
+			data->maxaccel[i] = 0.0;
+			numericValid = false;
+		}
 		
 		// check for user specified accel limit parameter
-		if (data->maxaccel[i] <= 0.0)
+		if (configuredMaxAcceleration <= 0.0)
 		{
 			// set to zero if negative
 			data->maxaccel[i] = 0.0;
@@ -621,15 +781,24 @@ void update_freq(void *arg, long period)
 		else 
 		{
 			// parameter is non-zero, compare to max_ac
-			if ((data->maxaccel[i] * fabs(data->pos_scale[i])) > max_ac)
+			desired_accel =
+				configuredMaxAcceleration * scaleMagnitude;
+
+			if (!isfinite(desired_accel))
+			{
+				max_ac = 0.0;
+				numericValid = false;
+			}
+			else if (desired_accel > max_ac)
 			{
 				// parameter is too high, lower it
-				data->maxaccel[i] = max_ac / fabs(data->pos_scale[i]);
+				data->maxaccel[i] =
+					max_ac / scaleMagnitude;
 			}
 			else
 			{
 				// lower limit to match parameter
-				max_ac = data->maxaccel[i] * fabs(data->pos_scale[i]);
+				max_ac = desired_accel;
 			}
 		}
 
@@ -643,41 +812,74 @@ void update_freq(void *arg, long period)
 			/* POSITION CONTROL MODE */
 
 			// use Proportional control with feed forward (pgain, ff1gain and deadband)
-			
-			if (*(data->pgain[i]) != 0)
+
+			pgain = *(data->pgain[i]);
+			ff1gain = *(data->ff1gain[i]);
+			deadband = *(data->deadband[i]);
+			command = *(data->pos_cmd[i]);
+			feedback = *(data->pos_fb[i]);
+
+			if (!isfinite(pgain) || (fabs(pgain) > FLT_MAX))
 			{
-				pgain = *(data->pgain[i]);
+				pgain = 1.0;
+				numericValid = false;
 			}
-			else
+			else if (pgain == 0.0)
 			{
 				pgain = 1.0;
 			}
-			
-			if (*(data->ff1gain[i]) != 0)
+
+			pgain = (double)(float)pgain;
+
+			if (!isfinite(ff1gain) || (fabs(ff1gain) > FLT_MAX))
 			{
-				ff1gain = *(data->ff1gain[i]);
+				ff1gain = 1.0;
+				numericValid = false;
 			}
-			else
+			else if (ff1gain == 0.0)
 			{
 				ff1gain = 1.0;
 			}
-			
-			if (*(data->deadband[i]) != 0)
+
+			ff1gain = (double)(float)ff1gain;
+
+			if (!isfinite(deadband) || (fabs(deadband) > FLT_MAX))
 			{
-				deadband = *(data->deadband[i]);
+				deadband = 0.0;
+				numericValid = false;
 			}
-			else
+			else if (deadband == 0.0)
 			{
-				deadband = fabs(1/data->pos_scale[i]);
-			}	
-			
-			// read the command and feedback
-			command = *(data->pos_cmd[i]);
-			feedback = *(data->pos_fb[i]);
-			
+				deadband = fabs(1.0 / scale);
+			}
+
+			deadband = (double)(float)deadband;
+
+			commandRepresentable =
+				isfinite(command) &&
+				(fabs(command) <= FLT_MAX);
+
+			if (!commandRepresentable)
+			{
+				command = (double)data->prev_cmd[i];
+				numericValid = false;
+			}
+
+			if (!isfinite(feedback))
+			{
+				feedback = 0.0;
+				numericValid = false;
+			}
+
 			// calcuate the error
 			error = command - feedback;
-			
+
+			if (!isfinite(error))
+			{
+				error = 0.0;
+				numericValid = false;
+			}
+
 			// apply the deadband
 			if (error > deadband)
 			{
@@ -691,60 +893,137 @@ void update_freq(void *arg, long period)
 			{
 				error = 0;
 			}
-			
+
 			// calcuate command and derivatives
-			data->cmd_d[i] = (command - data->prev_cmd[i]) * periodrecip;
-			
-			// save old values
-			data->prev_cmd[i] = command;
-				
+			commandDerivative =
+				(command - (double)data->prev_cmd[i]) *
+				periodrecip;
+
+			if (!isfinite(commandDerivative) ||
+				(fabs(commandDerivative) > FLT_MAX))
+			{
+				commandDerivative = 0.0;
+				numericValid = false;
+			}
+
+			if (numericValid)
+			{
+				data->cmd_d[i] =
+					(float)commandDerivative;
+			}
+			else
+			{
+				data->cmd_d[i] = 0.0F;
+			}
+
+			commandDerivative =
+				(double)data->cmd_d[i];
+
+			data->prev_cmd[i] = (float)command;
+
 			// calculate the output value
-			vel_cmd = pgain * error + data->cmd_d[i] * ff1gain;
-		
+			vel_cmd =
+				pgain * error +
+				commandDerivative * ff1gain;
+
+			if (!isfinite(vel_cmd))
+			{
+				vel_cmd = 0.0;
+				numericValid = false;
+			}
+
+			if (!numericValid)
+			{
+				data->cmd_d[i] = 0.0F;
+			}
+
 		} else {
 
 			/* VELOCITY CONTROL MODE */
-			
+
 			// calculate velocity command in counts/sec
 			vel_cmd = *(data->vel_cmd[i]);
-		}	
-			
-		vel_cmd = vel_cmd * data->pos_scale[i];
-			
+
+			if (!isfinite(vel_cmd))
+			{
+				vel_cmd = 0.0;
+				numericValid = false;
+			}
+		}
+
+		if (numericValid)
+		{
+			vel_cmd = vel_cmd * scale;
+
+			if (!isfinite(vel_cmd))
+			{
+				vel_cmd = 0.0;
+				numericValid = false;
+			}
+		}
+
 		// apply frequency limit
-		if (vel_cmd > max_freq) 
+		if (numericValid && (vel_cmd > max_freq))
 		{
 			vel_cmd = max_freq;
-		} 
-		else if (vel_cmd < -max_freq) 
+		}
+		else if (numericValid && (vel_cmd < -max_freq))
 		{
 			vel_cmd = -max_freq;
 		}
-		
+
 		// calc max change in frequency in one period
-		dv = max_ac * dt;
-		
-		// apply accel limit
-		if ( vel_cmd > (data->freq[i] + dv) )
+		if (numericValid)
 		{
-			new_vel = data->freq[i] + dv;
-		} 
-		else if ( vel_cmd < (data->freq[i] - dv) ) 
-		{
-			new_vel = data->freq[i] - dv;
+			dv = max_ac * dt;
+
+			if (!isfinite(dv))
+			{
+				dv = 0.0;
+				numericValid = false;
+			}
 		}
-		else
+
+		// apply accel limit
+		if (numericValid &&
+			(vel_cmd > (priorFrequency + dv)))
+		{
+			new_vel = priorFrequency + dv;
+		}
+		else if (numericValid &&
+			(vel_cmd < (priorFrequency - dv)))
+		{
+			new_vel = priorFrequency - dv;
+		}
+		else if (numericValid)
 		{
 			new_vel = vel_cmd;
 		}
-		
+
+		if (!isfinite(new_vel) ||
+			(fabs(new_vel) > FLT_MAX))
+		{
+			new_vel = 0.0;
+			numericValid = false;
+		}
+
 		// test for disabled stepgen
 		if (*(data->stepperEnable[i]) == 0) {
 			// set velocity to zero
-			new_vel = 0; 
+			new_vel = 0;
 		}
-		
-		data->freq[i] = new_vel;				// to be sent to the PRU
+
+		if (!numericValid)
+		{
+			new_vel = 0.0;
+
+			if (data->pos_mode[i])
+			{
+				data->cmd_d[i] = 0.0F;
+			}
+		}
+
+		data->freq[i] = (float)new_vel;		// to be sent to the PRU
 		*(data->freq_cmd[i]) = data->freq[i];	// feedback to LinuxCNC
 	}
 
@@ -799,10 +1078,31 @@ void pru_read()
 
 					for (i = 0; i < JOINTS; i++)
 					{
+						bool scaleValid;
+
 						count[i] = rxData.jointFeedback[i];
 						
 						*(data->count[i]) = count[i];
-						*(data->pos_fb[i]) = (float)(count[i]) / data->pos_scale[i];
+						scaleValid =
+							sanitize_pos_scale(
+								&data->pos_scale[i]);
+
+						if (!scaleValid)
+						{
+							data->old_scale[i] = 0.0;
+							data->scale_recip[i] = 0.0;
+						}
+
+						curr_pos =
+							(float)(count[i]) /
+							data->pos_scale[i];
+
+						if (!isfinite(curr_pos))
+						{
+							curr_pos = 0.0;
+						}
+
+						*(data->pos_fb[i]) = curr_pos;
 					}
 
 					// Feedback
@@ -899,7 +1199,8 @@ static void pru_write(void *arg, long period)
 	// Joint frequency commands
 	for (i = 0; i < JOINTS; i++)
 	{
-		txData.jointFreqCmd[i] = data->freq[i];
+		txData.jointFreqCmd[i] =
+			frequency_to_int32(data->freq[i]);
 	}
 
 	for (i = 0; i < JOINTS; i++)
@@ -917,7 +1218,9 @@ static void pru_write(void *arg, long period)
 	// Set points
 	for (i = 0; i < VARIABLES; i++)
 	{
-		txData.setPoint[i] = *(data->setPoint[i]);
+		txData.setPoint[i] =
+			setpoint_to_protocol_float(
+				*(data->setPoint[i]));
 	}
 
 	// Outputs
