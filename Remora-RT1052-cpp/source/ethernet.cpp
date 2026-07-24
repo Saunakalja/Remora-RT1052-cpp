@@ -10,6 +10,7 @@
 
 #include "board.h"
 #include "ethernet.h"
+#include "tftpserver.h"
 
 #include "fsl_silicon_id.h"
 #include "fsl_phy.h"
@@ -67,12 +68,37 @@ static bool controlSerialNumberIsNewer(
 		(difference < UINT32_C(0x80000000));
 }
 
-static void clearMaintenanceState(void)
+static void clearMaintenanceInterval(void)
 {
 	maintenanceIntervalActive = false;
+	maintenanceExpirationDeadline = 0U;
+}
+
+static void clearMaintenanceState(void)
+{
+	IAP_tftp_close_window();
+
+	clearMaintenanceInterval();
 	maintenanceSequenceInitialized = false;
 	latestMaintenanceSequence = 0U;
-	maintenanceExpirationDeadline = 0U;
+}
+
+static void reconcileMaintenanceInterval(void)
+{
+	const bool tftpWindowOpen =
+		IAP_tftp_window_open();
+
+	if (maintenanceIntervalActive)
+	{
+		if (!tftpWindowOpen)
+		{
+			clearMaintenanceInterval();
+		}
+	}
+	else if (tftpWindowOpen)
+	{
+		IAP_tftp_close_window();
+	}
 }
 
 static bool maintenanceDeadlineReached(
@@ -94,8 +120,8 @@ static void expireMaintenanceInterval(
 		maintenanceDeadlineReached(
 			currentTime))
 	{
-		maintenanceIntervalActive = false;
-		maintenanceExpirationDeadline = 0U;
+		IAP_tftp_close_window();
+		clearMaintenanceInterval();
 	}
 }
 
@@ -287,6 +313,8 @@ void initEthernet(void)
 
 void EthernetTasks(void)
 {
+    reconcileMaintenanceInterval();
+
     expireMaintenanceInterval(
         sys_now());
 
@@ -524,6 +552,8 @@ void udp_data_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip
 		const uint32_t currentTime =
 			sys_now();
 
+		reconcileMaintenanceInterval();
+
 		expireMaintenanceInterval(
 			currentTime);
 
@@ -541,6 +571,13 @@ void udp_data_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip
 					requestEnvelope.sequence,
 					latestMaintenanceSequence))
 		{
+			if (!IAP_tftp_open_window(
+					&activeControlPeer))
+			{
+				pbuf_free(p);
+				return;
+			}
+
 			maintenanceSequenceInitialized = true;
 			latestMaintenanceSequence =
 				requestEnvelope.sequence;
