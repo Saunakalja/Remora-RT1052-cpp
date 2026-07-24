@@ -502,9 +502,70 @@ void deserialiseJSON()
     }
 }
 
-static bool isValidGpioPinName(
-    const char* pinName)
+static constexpr uint32_t gpioPortCount =
+    4U;
+
+static constexpr uint32_t gpioPinsPerPort =
+    32U;
+
+static constexpr uint32_t gpioRegistrySize =
+    gpioPortCount *
+    gpioPinsPerPort;
+
+struct GpioIdentity
 {
+    uint8_t port;
+    uint8_t pin;
+};
+
+struct GpioOwner
+{
+    const char* ownerType;
+    const char* role;
+    uint32_t moduleEntry;
+    bool fixed;
+};
+
+struct FixedGpioReservation
+{
+    GpioIdentity identity;
+    const char* ownerType;
+    const char* role;
+};
+
+static const FixedGpioReservation fixedGpioReservations[] =
+{
+    {{2U, 16U}, "Debug Console", "LPUART4 TX"},
+    {{2U, 17U}, "Debug Console", "LPUART4 RX"},
+    {{2U, 20U}, "ENET", "RX Data 0"},
+    {{2U, 21U}, "ENET", "RX Data 1"},
+    {{2U, 22U}, "ENET", "RX Enable"},
+    {{2U, 23U}, "ENET", "TX Data 0"},
+    {{2U, 24U}, "ENET", "TX Data 1"},
+    {{2U, 25U}, "ENET", "TX Enable"},
+    {{2U, 26U}, "ENET", "Reference Clock"},
+    {{2U, 27U}, "ENET", "RX Error"},
+    {{2U, 28U}, "NVMPG UART", "LPUART5 TX"},
+    {{2U, 29U}, "NVMPG UART", "LPUART5 RX"},
+    {{2U, 30U}, "ENET", "MDC"},
+    {{2U, 31U}, "ENET", "MDIO"},
+    {{3U, 0U}, "RemoraComms", "Status LED"},
+    {{3U, 5U}, "FlexSPI/XIP", "A DQS"},
+    {{3U, 6U}, "FlexSPI/XIP", "A SS0"},
+    {{3U, 7U}, "FlexSPI/XIP", "A SCLK"},
+    {{3U, 8U}, "FlexSPI/XIP", "A Data 0"},
+    {{3U, 9U}, "FlexSPI/XIP", "A Data 1"},
+    {{3U, 10U}, "FlexSPI/XIP", "A Data 2"},
+    {{3U, 11U}, "FlexSPI/XIP", "A Data 3"}
+};
+
+static bool parseGpioPinName(
+    const char* pinName,
+    GpioIdentity &identity)
+{
+    identity =
+        {0U, 0U};
+
     if (pinName == nullptr)
     {
         return false;
@@ -547,47 +608,134 @@ static bool isValidGpioPinName(
                 pinName[4] - '0');
     }
 
-    return pinNumber <= 31U;
+    if (pinNumber >= gpioPinsPerPort)
+    {
+        return false;
+    }
+
+    identity.port =
+        static_cast<uint8_t>(
+            pinName[1] - '0');
+
+    identity.pin =
+        static_cast<uint8_t>(
+            pinNumber);
+
+    return true;
 }
 
-static bool gpioPinNamesReferToSamePin(
-    const char* firstPinName,
-    const char* secondPinName)
+static bool gpioIdentitiesReferToSamePin(
+    const GpioIdentity &first,
+    const GpioIdentity &second)
 {
-    const uint32_t firstPort =
-        static_cast<uint32_t>(
-            firstPinName[1] - '0');
+    return (first.port == second.port) &&
+           (first.pin == second.pin);
+}
 
-    const uint32_t secondPort =
-        static_cast<uint32_t>(
-            secondPinName[1] - '0');
-
-    uint32_t firstPinNumber =
-        static_cast<uint32_t>(
-            firstPinName[3] - '0');
-
-    if (firstPinName[4] != '\0')
+static bool claimGpioOwnership(
+    GpioOwner gpioOwners[gpioRegistrySize],
+    const GpioIdentity &identity,
+    const char* ownerType,
+    const char* role,
+    uint32_t moduleEntry,
+    bool fixed)
+{
+    if ((identity.port < 1U) ||
+        (identity.port > gpioPortCount) ||
+        (identity.pin >= gpioPinsPerPort))
     {
-        firstPinNumber =
-            firstPinNumber * 10U +
-            static_cast<uint32_t>(
-                firstPinName[4] - '0');
+        printf(
+            "Internal GPIO ownership identity P%u_%u is invalid\n",
+            static_cast<unsigned int>(identity.port),
+            static_cast<unsigned int>(identity.pin));
+        return false;
     }
 
-    uint32_t secondPinNumber =
+    const uint32_t gpioKey =
+        (static_cast<uint32_t>(
+             identity.port) -
+         1U) *
+        gpioPinsPerPort +
         static_cast<uint32_t>(
-            secondPinName[3] - '0');
+            identity.pin);
 
-    if (secondPinName[4] != '\0')
+    GpioOwner &existingOwner =
+        gpioOwners[gpioKey];
+
+    if (existingOwner.ownerType != nullptr)
     {
-        secondPinNumber =
-            secondPinNumber * 10U +
-            static_cast<uint32_t>(
-                secondPinName[4] - '0');
+        if (fixed)
+        {
+            if (existingOwner.fixed)
+            {
+                printf(
+                    "Fixed GPIO P%u_%u %s %s conflicts with fixed %s %s\n",
+                    static_cast<unsigned int>(identity.port),
+                    static_cast<unsigned int>(identity.pin),
+                    ownerType,
+                    role,
+                    existingOwner.ownerType,
+                    existingOwner.role);
+            }
+            else
+            {
+                printf(
+                    "Fixed GPIO P%u_%u %s %s conflicts with %s %s from module entry %lu\n",
+                    static_cast<unsigned int>(identity.port),
+                    static_cast<unsigned int>(identity.pin),
+                    ownerType,
+                    role,
+                    existingOwner.ownerType,
+                    existingOwner.role,
+                    static_cast<unsigned long>(
+                        existingOwner.moduleEntry));
+            }
+        }
+        else if (existingOwner.fixed)
+        {
+            printf(
+                "GPIO P%u_%u %s %s from module entry %lu conflicts with fixed %s %s\n",
+                static_cast<unsigned int>(identity.port),
+                static_cast<unsigned int>(identity.pin),
+                ownerType,
+                role,
+                static_cast<unsigned long>(
+                    moduleEntry),
+                existingOwner.ownerType,
+                existingOwner.role);
+        }
+        else
+        {
+            printf(
+                "GPIO P%u_%u %s %s from module entry %lu conflicts with %s %s from module entry %lu\n",
+                static_cast<unsigned int>(identity.port),
+                static_cast<unsigned int>(identity.pin),
+                ownerType,
+                role,
+                static_cast<unsigned long>(
+                    moduleEntry),
+                existingOwner.ownerType,
+                existingOwner.role,
+                static_cast<unsigned long>(
+                    existingOwner.moduleEntry));
+        }
+
+        return false;
     }
 
-    return (firstPort == secondPort) &&
-           (firstPinNumber == secondPinNumber);
+    existingOwner.ownerType =
+        ownerType;
+
+    existingOwner.role =
+        role;
+
+    existingOwner.moduleEntry =
+        moduleEntry;
+
+    existingOwner.fixed =
+        fixed;
+
+    return true;
 }
 
 void getBoardType()
@@ -871,11 +1019,25 @@ void loadModules(void)
 
     uint32_t inputBitProducerEntry[32] = {};
 
-    const char* dmaStepgenPinRole[32] = {};
-
-    uint32_t dmaStepgenPinOwnerEntry[32] = {};
-
     bool qdcEncoderConfigured[MAX_INST_QDC_MOD] = {};
+
+    GpioOwner gpioOwners[gpioRegistrySize] = {};
+
+    for (const FixedGpioReservation &reservation :
+         fixedGpioReservations)
+    {
+        if (!claimGpioOwnership(
+                gpioOwners,
+                reservation.identity,
+                reservation.ownerType,
+                reservation.role,
+                0U,
+                true))
+        {
+            configError = true;
+            return;
+        }
+    }
 
     uint32_t moduleIndex = 0U;
     for (JsonArrayConst::iterator it=Modules.begin(); it!=Modules.end(); ++it)
@@ -1031,7 +1193,12 @@ void loadModules(void)
             const char* stepPin =
                 stepPinValue.as<const char*>();
 
-            if (!isValidGpioPinName(stepPin))
+            GpioIdentity stepPinIdentity =
+                {0U, 0U};
+
+            if (!parseGpioPinName(
+                    stepPin,
+                    stepPinIdentity))
             {
                 printf(
                     "DMAstepgen module entry %lu step pin is invalid\n",
@@ -1055,7 +1222,12 @@ void loadModules(void)
             const char* directionPin =
                 directionPinValue.as<const char*>();
 
-            if (!isValidGpioPinName(directionPin))
+            GpioIdentity directionPinIdentity =
+                {0U, 0U};
+
+            if (!parseGpioPinName(
+                    directionPin,
+                    directionPinIdentity))
             {
                 printf(
                     "DMAstepgen module entry %lu direction pin is invalid\n",
@@ -1084,9 +1256,9 @@ void loadModules(void)
                 return;
             }
 
-            if (gpioPinNamesReferToSamePin(
-                    stepPin,
-                    directionPin))
+            if (gpioIdentitiesReferToSamePin(
+                    stepPinIdentity,
+                    directionPinIdentity))
             {
                 printf(
                     "DMAstepgen module entry %lu step and direction pins refer to the same GPIO\n",
@@ -1138,67 +1310,24 @@ void loadModules(void)
                 }
             }
 
-            uint32_t stepPinNumber =
-                static_cast<uint32_t>(
-                    stepPin[3] - '0');
-
-            if (stepPin[4] != '\0')
+            if (!claimGpioOwnership(
+                    gpioOwners,
+                    stepPinIdentity,
+                    "DMAstepgen",
+                    "Step Pin",
+                    moduleIndex,
+                    false) ||
+                !claimGpioOwnership(
+                    gpioOwners,
+                    directionPinIdentity,
+                    "DMAstepgen",
+                    "Direction Pin",
+                    moduleIndex,
+                    false))
             {
-                stepPinNumber =
-                    stepPinNumber * 10U +
-                    static_cast<uint32_t>(
-                        stepPin[4] - '0');
-            }
-
-            uint32_t directionPinNumber =
-                static_cast<uint32_t>(
-                    directionPin[3] - '0');
-
-            if (directionPin[4] != '\0')
-            {
-                directionPinNumber =
-                    directionPinNumber * 10U +
-                    static_cast<uint32_t>(
-                        directionPin[4] - '0');
-            }
-
-            if (dmaStepgenPinRole[stepPinNumber] != nullptr)
-            {
-                printf(
-                    "DMAstepgen module entry %lu Step Pin %s conflicts with %s from module entry %lu\n",
-                    static_cast<unsigned long>(moduleIndex),
-                    stepPin,
-                    dmaStepgenPinRole[stepPinNumber],
-                    static_cast<unsigned long>(
-                        dmaStepgenPinOwnerEntry[stepPinNumber]));
                 configError = true;
                 return;
             }
-
-            if (dmaStepgenPinRole[directionPinNumber] != nullptr)
-            {
-                printf(
-                    "DMAstepgen module entry %lu Direction Pin %s conflicts with %s from module entry %lu\n",
-                    static_cast<unsigned long>(moduleIndex),
-                    directionPin,
-                    dmaStepgenPinRole[directionPinNumber],
-                    static_cast<unsigned long>(
-                        dmaStepgenPinOwnerEntry[directionPinNumber]));
-                configError = true;
-                return;
-            }
-
-            dmaStepgenPinRole[stepPinNumber] =
-                "Step Pin";
-
-            dmaStepgenPinOwnerEntry[stepPinNumber] =
-                moduleIndex;
-
-            dmaStepgenPinRole[directionPinNumber] =
-                "Direction Pin";
-
-            dmaStepgenPinOwnerEntry[directionPinNumber] =
-                moduleIndex;
 
             jointConfigured[jointNumber] =
                 true;
@@ -1257,7 +1386,12 @@ void loadModules(void)
             const char* stepPin =
                 stepPinValue.as<const char*>();
 
-            if (!isValidGpioPinName(stepPin))
+            GpioIdentity stepPinIdentity =
+                {0U, 0U};
+
+            if (!parseGpioPinName(
+                    stepPin,
+                    stepPinIdentity))
             {
                 printf(
                     "Stepgen module entry %lu step pin is invalid\n",
@@ -1281,7 +1415,12 @@ void loadModules(void)
             const char* directionPin =
                 directionPinValue.as<const char*>();
 
-            if (!isValidGpioPinName(directionPin))
+            GpioIdentity directionPinIdentity =
+                {0U, 0U};
+
+            if (!parseGpioPinName(
+                    directionPin,
+                    directionPinIdentity))
             {
                 printf(
                     "Stepgen module entry %lu direction pin is invalid\n",
@@ -1290,13 +1429,32 @@ void loadModules(void)
                 return;
             }
 
-            if (gpioPinNamesReferToSamePin(
-                    stepPin,
-                    directionPin))
+            if (gpioIdentitiesReferToSamePin(
+                    stepPinIdentity,
+                    directionPinIdentity))
             {
                 printf(
                     "Stepgen module entry %lu step and direction pins refer to the same GPIO\n",
                     static_cast<unsigned long>(moduleIndex));
+                configError = true;
+                return;
+            }
+
+            if (!claimGpioOwnership(
+                    gpioOwners,
+                    stepPinIdentity,
+                    "Stepgen",
+                    "Step Pin",
+                    moduleIndex,
+                    false) ||
+                !claimGpioOwnership(
+                    gpioOwners,
+                    directionPinIdentity,
+                    "Stepgen",
+                    "Direction Pin",
+                    moduleIndex,
+                    false))
+            {
                 configError = true;
                 return;
             }
@@ -1348,7 +1506,12 @@ void loadModules(void)
             const char* channelAPin =
                 channelAPinValue.as<const char*>();
 
-            if (!isValidGpioPinName(channelAPin))
+            GpioIdentity channelAIdentity =
+                {0U, 0U};
+
+            if (!parseGpioPinName(
+                    channelAPin,
+                    channelAIdentity))
             {
                 printf(
                     "Encoder module entry %lu channel A pin is invalid\n",
@@ -1372,7 +1535,12 @@ void loadModules(void)
             const char* channelBPin =
                 channelBPinValue.as<const char*>();
 
-            if (!isValidGpioPinName(channelBPin))
+            GpioIdentity channelBIdentity =
+                {0U, 0U};
+
+            if (!parseGpioPinName(
+                    channelBPin,
+                    channelBIdentity))
             {
                 printf(
                     "Encoder module entry %lu channel B pin is invalid\n",
@@ -1381,9 +1549,9 @@ void loadModules(void)
                 return;
             }
 
-            if (gpioPinNamesReferToSamePin(
-                    channelAPin,
-                    channelBPin))
+            if (gpioIdentitiesReferToSamePin(
+                    channelAIdentity,
+                    channelBIdentity))
             {
                 printf(
                     "Encoder module entry %lu channel A and channel B pins refer to the same GPIO\n",
@@ -1394,6 +1562,10 @@ void loadModules(void)
 
             bool producesInputBit = false;
             uint32_t inputDataBit = 0U;
+            const char* indexPin = nullptr;
+
+            GpioIdentity indexIdentity =
+                {0U, 0U};
 
             if (moduleObject.containsKey("Index Pin"))
             {
@@ -1409,10 +1581,12 @@ void loadModules(void)
                     return;
                 }
 
-                const char* indexPin =
+                indexPin =
                     indexPinValue.as<const char*>();
 
-                if (!isValidGpioPinName(indexPin))
+                if (!parseGpioPinName(
+                        indexPin,
+                        indexIdentity))
                 {
                     printf(
                         "Encoder module entry %lu index pin is invalid\n",
@@ -1421,9 +1595,9 @@ void loadModules(void)
                     return;
                 }
 
-                if (gpioPinNamesReferToSamePin(
-                        indexPin,
-                        channelAPin))
+                if (gpioIdentitiesReferToSamePin(
+                        indexIdentity,
+                        channelAIdentity))
                 {
                     printf(
                         "Encoder module entry %lu index pin conflicts with channel A pin\n",
@@ -1432,9 +1606,9 @@ void loadModules(void)
                     return;
                 }
 
-                if (gpioPinNamesReferToSamePin(
-                        indexPin,
-                        channelBPin))
+                if (gpioIdentitiesReferToSamePin(
+                        indexIdentity,
+                        channelBIdentity))
                 {
                     printf(
                         "Encoder module entry %lu index pin conflicts with channel B pin\n",
@@ -1482,21 +1656,49 @@ void loadModules(void)
                 return;
             }
 
+            if (producesInputBit &&
+                (inputBitProducer[inputDataBit] != nullptr))
+            {
+                printf(
+                    "Encoder module entry %lu data bit %lu is already produced by %s module entry %lu\n",
+                    static_cast<unsigned long>(moduleIndex),
+                    static_cast<unsigned long>(inputDataBit),
+                    inputBitProducer[inputDataBit],
+                    static_cast<unsigned long>(
+                        inputBitProducerEntry[inputDataBit]));
+                configError = true;
+                return;
+            }
+
+            if (!claimGpioOwnership(
+                    gpioOwners,
+                    channelAIdentity,
+                    "Encoder",
+                    "ChA Pin",
+                    moduleIndex,
+                    false) ||
+                !claimGpioOwnership(
+                    gpioOwners,
+                    channelBIdentity,
+                    "Encoder",
+                    "ChB Pin",
+                    moduleIndex,
+                    false) ||
+                ((indexPin != nullptr) &&
+                 !claimGpioOwnership(
+                     gpioOwners,
+                     indexIdentity,
+                     "Encoder",
+                     "Index Pin",
+                     moduleIndex,
+                     false)))
+            {
+                configError = true;
+                return;
+            }
+
             if (producesInputBit)
             {
-                if (inputBitProducer[inputDataBit] != nullptr)
-                {
-                    printf(
-                        "Encoder module entry %lu data bit %lu is already produced by %s module entry %lu\n",
-                        static_cast<unsigned long>(moduleIndex),
-                        static_cast<unsigned long>(inputDataBit),
-                        inputBitProducer[inputDataBit],
-                        static_cast<unsigned long>(
-                            inputBitProducerEntry[inputDataBit]));
-                    configError = true;
-                    return;
-                }
-
                 inputBitProducer[inputDataBit] =
                     "Encoder";
 
@@ -1611,6 +1813,21 @@ void loadModules(void)
                 return;
             }
 
+            GpioIdentity channelAIdentity =
+                {0U, 0U};
+
+            if (!parseGpioPinName(
+                    channelAPin,
+                    channelAIdentity))
+            {
+                printf(
+                    "QDC module entry %lu channel A pin %s has no canonical GPIO identity\n",
+                    static_cast<unsigned long>(moduleIndex),
+                    channelAPin);
+                configError = true;
+                return;
+            }
+
             JsonVariantConst channelBPinValue =
                 moduleObject["ChB Pin"];
 
@@ -1647,9 +1864,24 @@ void loadModules(void)
                 return;
             }
 
-            if (gpioPinNamesReferToSamePin(
-                    channelAPin,
-                    channelBPin))
+            GpioIdentity channelBIdentity =
+                {0U, 0U};
+
+            if (!parseGpioPinName(
+                    channelBPin,
+                    channelBIdentity))
+            {
+                printf(
+                    "QDC module entry %lu channel B pin %s has no canonical GPIO identity\n",
+                    static_cast<unsigned long>(moduleIndex),
+                    channelBPin);
+                configError = true;
+                return;
+            }
+
+            if (gpioIdentitiesReferToSamePin(
+                    channelAIdentity,
+                    channelBIdentity))
             {
                 printf(
                     "QDC module entry %lu channel A pin %s conflicts with channel B pin %s\n",
@@ -1712,6 +1944,10 @@ void loadModules(void)
 
             bool producesInputBit = false;
             uint32_t inputDataBit = 0U;
+            const char* indexPin = nullptr;
+
+            GpioIdentity indexIdentity =
+                {0U, 0U};
 
             JsonVariantConst indexPinValue =
                 moduleObject["Index Pin"];
@@ -1727,7 +1963,7 @@ void loadModules(void)
                     return;
                 }
 
-                const char* indexPin =
+                indexPin =
                     indexPinValue.as<const char*>();
 
                 if ((indexPin == nullptr) ||
@@ -1751,9 +1987,21 @@ void loadModules(void)
                     return;
                 }
 
-                if (gpioPinNamesReferToSamePin(
+                if (!parseGpioPinName(
                         indexPin,
-                        channelAPin))
+                        indexIdentity))
+                {
+                    printf(
+                        "QDC module entry %lu index pin %s has no canonical GPIO identity\n",
+                        static_cast<unsigned long>(moduleIndex),
+                        indexPin);
+                    configError = true;
+                    return;
+                }
+
+                if (gpioIdentitiesReferToSamePin(
+                        indexIdentity,
+                        channelAIdentity))
                 {
                     printf(
                         "QDC module entry %lu index pin %s conflicts with channel A pin %s\n",
@@ -1764,9 +2012,9 @@ void loadModules(void)
                     return;
                 }
 
-                if (gpioPinNamesReferToSamePin(
-                        indexPin,
-                        channelBPin))
+                if (gpioIdentitiesReferToSamePin(
+                        indexIdentity,
+                        channelBIdentity))
                 {
                     printf(
                         "QDC module entry %lu index pin %s conflicts with channel B pin %s\n",
@@ -1816,21 +2064,49 @@ void loadModules(void)
                 return;
             }
 
+            if (producesInputBit &&
+                (inputBitProducer[inputDataBit] != nullptr))
+            {
+                printf(
+                    "QDC module entry %lu data bit %lu is already produced by %s module entry %lu\n",
+                    static_cast<unsigned long>(moduleIndex),
+                    static_cast<unsigned long>(inputDataBit),
+                    inputBitProducer[inputDataBit],
+                    static_cast<unsigned long>(
+                        inputBitProducerEntry[inputDataBit]));
+                configError = true;
+                return;
+            }
+
+            if (!claimGpioOwnership(
+                    gpioOwners,
+                    channelAIdentity,
+                    "QDC",
+                    "ChA Pin",
+                    moduleIndex,
+                    false) ||
+                !claimGpioOwnership(
+                    gpioOwners,
+                    channelBIdentity,
+                    "QDC",
+                    "ChB Pin",
+                    moduleIndex,
+                    false) ||
+                ((indexPin != nullptr) &&
+                 !claimGpioOwnership(
+                     gpioOwners,
+                     indexIdentity,
+                     "QDC",
+                     "Index Pin",
+                     moduleIndex,
+                     false)))
+            {
+                configError = true;
+                return;
+            }
+
             if (producesInputBit)
             {
-                if (inputBitProducer[inputDataBit] != nullptr)
-                {
-                    printf(
-                        "QDC module entry %lu data bit %lu is already produced by %s module entry %lu\n",
-                        static_cast<unsigned long>(moduleIndex),
-                        static_cast<unsigned long>(inputDataBit),
-                        inputBitProducer[inputDataBit],
-                        static_cast<unsigned long>(
-                            inputBitProducerEntry[inputDataBit]));
-                    configError = true;
-                    return;
-                }
-
                 inputBitProducer[inputDataBit] =
                     "QDC";
 
@@ -1863,7 +2139,12 @@ void loadModules(void)
             const char* configuredPin =
                 pinValue.as<const char*>();
 
-            if (!isValidGpioPinName(configuredPin))
+            GpioIdentity configuredPinIdentity =
+                {0U, 0U};
+
+            if (!parseGpioPinName(
+                    configuredPin,
+                    configuredPinIdentity))
             {
                 printf(
                     "Digital Pin module entry %lu pin is invalid\n",
@@ -2019,21 +2300,39 @@ void loadModules(void)
                 return;
             }
 
-            if (!strcmp(mode,"Input"))
-            {
-                if (inputBitProducer[dataBit] != nullptr)
-                {
-                    printf(
-                        "Digital Pin module entry %lu data bit %lu is already produced by %s module entry %lu\n",
-                        static_cast<unsigned long>(moduleIndex),
-                        static_cast<unsigned long>(dataBit),
-                        inputBitProducer[dataBit],
-                        static_cast<unsigned long>(
-                            inputBitProducerEntry[dataBit]));
-                    configError = true;
-                    return;
-                }
+            const bool isInput =
+                !strcmp(mode,"Input");
 
+            if (isInput &&
+                (inputBitProducer[dataBit] != nullptr))
+            {
+                printf(
+                    "Digital Pin module entry %lu data bit %lu is already produced by %s module entry %lu\n",
+                    static_cast<unsigned long>(moduleIndex),
+                    static_cast<unsigned long>(dataBit),
+                    inputBitProducer[dataBit],
+                    static_cast<unsigned long>(
+                        inputBitProducerEntry[dataBit]));
+                configError = true;
+                return;
+            }
+
+            if (!claimGpioOwnership(
+                    gpioOwners,
+                    configuredPinIdentity,
+                    "Digital Pin",
+                    isInput
+                        ? "Input Pin"
+                        : "Output Pin",
+                    moduleIndex,
+                    false))
+            {
+                configError = true;
+                return;
+            }
+
+            if (isInput)
+            {
                 inputBitProducer[dataBit] =
                     "Digital Pin";
 
@@ -2075,6 +2374,21 @@ void loadModules(void)
                     "Spindle PWM module entry %lu setpoint index %lu is out of range\n",
                     static_cast<unsigned long>(moduleIndex),
                     static_cast<unsigned long>(setPointIndex));
+                configError = true;
+                return;
+            }
+
+            const GpioIdentity spindlePwmIdentity =
+                {2U, 0U};
+
+            if (!claimGpioOwnership(
+                    gpioOwners,
+                    spindlePwmIdentity,
+                    "Spindle PWM",
+                    "Output Pad",
+                    moduleIndex,
+                    false))
+            {
                 configError = true;
                 return;
             }
