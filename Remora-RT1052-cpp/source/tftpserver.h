@@ -88,6 +88,9 @@ extern "C" {
 #endif
 
 void IAP_tftpd_init(edma_handle_t);
+bool IAP_tftp_open_window(const ip_addr_t *peer);
+void IAP_tftp_close_window(void);
+bool IAP_tftp_window_open(void);
 void IAP_tftp_finalize_upload(bool);
 
 #ifdef __cplusplus

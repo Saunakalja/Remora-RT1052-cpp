@@ -26,10 +26,20 @@
 #include "configuration.h"
 #include "extern.h"
 
+#define TFTP_LISTENER_WINDOW_MS 30000U
+
 
 /* Private variables ---------------------------------------------------------*/
 static uint32_t Flash_Write_Address;
-static struct udp_pcb *UDPpcb;
+static struct udp_pcb *UDPpcb =
+    nullptr;
+static bool tftpListenerWindowOpen =
+    false;
+static ip_addr_t tftpPermittedPeer = {};
+static bool tftpPermittedPeerValid =
+    false;
+static bool tftpListenerTimeoutArmed =
+    false;
 static __IO uint32_t total_count=0;
 static edma_handle_t edma_handle;
 static bool tftpTransferActive =
@@ -56,6 +66,7 @@ static void IAP_tftp_recv_callback(void *arg, struct udp_pcb *Upcb, struct pbuf 
                         const ip_addr_t *addr, u16_t port);
 
 static void IAP_tftp_cleanup_wr(struct udp_pcb *upcb, tftp_connection_args *args);
+static void IAP_tftp_listener_timeout(void *arg);
 static void IAP_tftp_timeout(void *arg);
 static void IAP_tftp_arm_timeout(
     tftp_connection_args *args);
@@ -880,6 +891,20 @@ static void IAP_tftp_recv_callback(void *arg, struct udp_pcb *upcb, struct pbuf 
     return;
   }
 
+  if (!tftpListenerWindowOpen ||
+      !tftpPermittedPeerValid ||
+      (UDPpcb == nullptr) ||
+      (upcb != UDPpcb) ||
+      !ip_addr_cmp(
+          addr,
+          &tftpPermittedPeer))
+  {
+    pbuf_free(pkt_buf);
+    return;
+  }
+
+  IAP_tftp_close_window();
+
   /* create new UDP PCB structure */
   upcb_tftp_data = udp_new();
   if (!upcb_tftp_data)
@@ -942,15 +967,124 @@ static void IAP_tftp_cleanup_wr(struct udp_pcb *upcb, tftp_connection_args *args
   tftpTransferActive =
       false;
 
-  if (UDPpcb != nullptr)
-  {
-    /* reset the callback function */
-    udp_recv(UDPpcb, IAP_tftp_recv_callback, NULL);
-  }
-
 }
 
 /* Global functions ---------------------------------------------------------*/
+
+static void IAP_tftp_listener_timeout(void *arg)
+{
+  (void)arg;
+
+  IAP_tftp_close_window();
+}
+
+bool IAP_tftp_open_window(
+    const ip_addr_t *peer)
+{
+  if ((peer == nullptr) ||
+      tftpTransferActive ||
+      tftpFinalizationPending)
+  {
+    return false;
+  }
+
+  if (tftpListenerWindowOpen)
+  {
+    return
+        tftpPermittedPeerValid &&
+        (UDPpcb != nullptr) &&
+        ip_addr_cmp(
+            peer,
+            &tftpPermittedPeer);
+  }
+
+  struct udp_pcb *listenerPcb =
+      udp_new();
+
+  if (listenerPcb == nullptr)
+  {
+    PRINTF(
+        "Failed to allocate TFTP UDP PCB !\r\n");
+    return false;
+  }
+
+  const err_t bindStatus =
+      udp_bind(
+          listenerPcb,
+          IP_ADDR_ANY,
+          69U);
+
+  if (bindStatus != ERR_OK)
+  {
+    PRINTF(
+        "Failed to bind TFTP UDP PCB to port 69 !\r\n");
+
+    udp_remove(
+        listenerPcb);
+
+    return false;
+  }
+
+  udp_recv(
+      listenerPcb,
+      IAP_tftp_recv_callback,
+      nullptr);
+
+  ip_addr_copy(
+      tftpPermittedPeer,
+      *peer);
+
+  tftpPermittedPeerValid =
+      true;
+  UDPpcb =
+      listenerPcb;
+  tftpListenerWindowOpen =
+      true;
+
+  sys_timeout(
+      TFTP_LISTENER_WINDOW_MS,
+      IAP_tftp_listener_timeout,
+      nullptr);
+
+  tftpListenerTimeoutArmed =
+      true;
+
+  return true;
+}
+
+void IAP_tftp_close_window(void)
+{
+  if (tftpListenerTimeoutArmed)
+  {
+    sys_untimeout(
+        IAP_tftp_listener_timeout,
+        nullptr);
+
+    tftpListenerTimeoutArmed =
+        false;
+  }
+
+  if (UDPpcb != nullptr)
+  {
+    udp_remove(
+        UDPpcb);
+
+    UDPpcb =
+        nullptr;
+  }
+
+  tftpListenerWindowOpen =
+      false;
+  tftpPermittedPeer = {};
+  tftpPermittedPeerValid =
+      false;
+}
+
+bool IAP_tftp_window_open(void)
+{
+  return
+      tftpListenerWindowOpen;
+}
 
 void IAP_tftp_finalize_upload(
     bool uploadSucceeded)
@@ -993,44 +1127,7 @@ void IAP_tftp_finalize_upload(
 void IAP_tftpd_init(edma_handle_t handle)
 {
   edma_handle = handle;
-  unsigned port = 69; /* 69 is the port used for TFTP protocol initial transaction */
-
-  /* create a new UDP PCB structure  */
-  UDPpcb = udp_new();
-  if (!UDPpcb)
-  {
-    /* Error creating PCB. Out of Memory  */
-    PRINTF(
-        "Failed to allocate TFTP UDP PCB !\r\n");
-    return;
-  }
-
-  /* Bind this PCB to port 69  */
-  const err_t bindStatus =
-      udp_bind(
-          UDPpcb,
-          IP_ADDR_ANY,
-          port);
-
-  if (bindStatus != ERR_OK)
-  {
-    PRINTF(
-        "Failed to bind TFTP UDP PCB to port 69 !\r\n");
-
-    udp_remove(
-        UDPpcb);
-
-    UDPpcb =
-        nullptr;
-
-    return;
-  }
-
-  /* Initialize receive callback function  */
-  udp_recv(
-      UDPpcb,
-      IAP_tftp_recv_callback,
-      nullptr);
+  IAP_tftp_close_window();
 }
 
 /************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/
