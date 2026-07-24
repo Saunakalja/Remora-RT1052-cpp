@@ -30,11 +30,15 @@ static phy_handle_t phyHandle   = {.phyAddr = BOARD_ENET0_PHY_ADDRESS, .mdioHand
 static bool ethernetInitialized = false;
 static bool controlSessionEstablished = false;
 static uint32_t activeControlSession = 0U;
+static ip_addr_t activeControlPeer = {};
+static bool activeControlPeerValid = false;
 static bool controlOpenPending = false;
 static uint32_t pendingControlSession = 0U;
 static uint32_t pendingControlSequence = 0U;
 static uint32_t pendingControlChallenge = 0U;
 static uint32_t pendingControlToken = 0U;
+static ip_addr_t pendingControlPeer = {};
+static bool pendingControlPeerValid = false;
 static uint32_t controlChallengeCounter = 0U;
 static bool controlHandoffRequested = false;
 static bool controlHandoffCompleted = false;
@@ -110,21 +114,54 @@ static bool nextControlChallenge(
 	return true;
 }
 
+static bool controlPeerMatches(
+	const ip_addr_t &expectedPeer,
+	bool expectedPeerValid,
+	const ip_addr_t *requestPeer)
+{
+	return
+		expectedPeerValid &&
+		(requestPeer != nullptr) &&
+		ip_addr_cmp(
+			&expectedPeer,
+			requestPeer);
+}
+
 static bool pendingControlAttemptMatches(
-	const controlEstablishment_t &request)
+	const controlEstablishment_t &request,
+	const ip_addr_t *requestPeer)
 {
 	return
 		controlOpenPending &&
 		(request.envelope.sessionId ==
 		 pendingControlSession) &&
 		(request.envelope.sequence ==
-		 pendingControlSequence);
+		 pendingControlSequence) &&
+		controlPeerMatches(
+			pendingControlPeer,
+			pendingControlPeerValid,
+			requestPeer);
+}
+
+static bool activeControlRequestMatches(
+	const controlEnvelope_t &request,
+	const ip_addr_t *requestPeer)
+{
+	return
+		controlSessionEstablished &&
+		(request.sessionId ==
+		 activeControlSession) &&
+		controlPeerMatches(
+			activeControlPeer,
+			activeControlPeerValid,
+			requestPeer);
 }
 
 bool controlSessionHandoffPending(void)
 {
 	return
 		controlOpenPending &&
+		pendingControlPeerValid &&
 		controlHandoffRequested &&
 		!controlHandoffCompleted;
 }
@@ -138,6 +175,10 @@ void controlSessionHandoffComplete(void)
 
 	activeControlSession =
 		pendingControlToken;
+	ip_addr_copy(
+		activeControlPeer,
+		pendingControlPeer);
+	activeControlPeerValid = true;
 	readSequenceInitialized = false;
 	writeSequenceInitialized = false;
 	clearMaintenanceState();
@@ -331,6 +372,12 @@ void udp_data_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip
 		return;
 	}
 
+	if (addr == nullptr)
+	{
+		pbuf_free(p);
+		return;
+	}
+
 	if ((p->tot_len < sizeof(requestEnvelope)) ||
 		(pbuf_copy_partial(
 			p,
@@ -386,7 +433,8 @@ void udp_data_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip
 
 			if (controlHandoffCompleted ||
 				!pendingControlAttemptMatches(
-					request))
+					request,
+					addr))
 			{
 				uint32_t challenge = 0U;
 
@@ -406,6 +454,10 @@ void udp_data_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip
 					challenge;
 				pendingControlToken =
 					pendingControlChallenge;
+				ip_addr_copy(
+					pendingControlPeer,
+					*addr);
+				pendingControlPeerValid = true;
 				controlHandoffRequested = false;
 				controlHandoffCompleted = false;
 			}
@@ -420,7 +472,8 @@ void udp_data_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip
 		else
 		{
 			if (!pendingControlAttemptMatches(
-					request) ||
+					request,
+					addr) ||
 				(request.challenge == 0U) ||
 				(request.challenge !=
 				 pendingControlChallenge) ||
@@ -460,19 +513,19 @@ void udp_data_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip
 			return;
 		}
 
+		if (!activeControlRequestMatches(
+				requestEnvelope,
+				addr))
+		{
+			pbuf_free(p);
+			return;
+		}
+
 		const uint32_t currentTime =
 			sys_now();
 
 		expireMaintenanceInterval(
 			currentTime);
-
-		if (!controlSessionEstablished ||
-			(requestEnvelope.sessionId !=
-			 activeControlSession))
-		{
-			pbuf_free(p);
-			return;
-		}
 
 		bool respondToRequest = false;
 
@@ -526,9 +579,9 @@ void udp_data_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip
 			return;
 		}
 
-		if (!controlSessionEstablished ||
-			(requestEnvelope.sessionId !=
-			 activeControlSession) ||
+		if (!activeControlRequestMatches(
+				requestEnvelope,
+				addr) ||
 			!acceptReadSequence(
 				requestEnvelope.sequence))
 		{
@@ -573,6 +626,14 @@ void udp_data_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip
 			return;
 		}
 
+		if (!activeControlRequestMatches(
+				requestEnvelope,
+				addr))
+		{
+			pbuf_free(p);
+			return;
+		}
+
 		uint8_t incomingData[sizeof(rxData.rxBuffer)];
 
 		if (pbuf_copy_partial(
@@ -580,14 +641,6 @@ void udp_data_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip
 				incomingData,
 				sizeof(incomingData),
 				0) != sizeof(incomingData))
-		{
-			pbuf_free(p);
-			return;
-		}
-
-		if (!controlSessionEstablished ||
-			(requestEnvelope.sessionId !=
-			 activeControlSession))
 		{
 			pbuf_free(p);
 			return;
