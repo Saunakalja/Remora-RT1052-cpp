@@ -57,6 +57,8 @@ typedef struct {
 	hal_bit_t		*PRUreset;
 	bool			resetOld;
 	hal_bit_t		*status;
+	hal_bit_t		*maintenanceEnable;
+	hal_bit_t		*maintenanceActive;
 	hal_bit_t 		*stepperEnable[JOINTS];
 	int				pos_mode[JOINTS];
 	hal_float_t 	*pos_cmd[JOINTS];			// pin: position command (position units)
@@ -117,6 +119,8 @@ RTAPI_MP_INT(PRU_base_freq, "PRU base thread frequency");
 #define READ_PCK_DELAY_NS 10000
 #define COMMUNICATION_CYCLE_BUDGET_NS 500000LL
 #define CONTROL_ACTIVATE_RETRY_LIMIT 3U
+#define MAINTENANCE_TRANSFER_ATTEMPT_LIMIT 3U
+#define MAINTENANCE_INTERVAL_NS INT64_C(30000000000)
 #define MIN_POS_SCALE 1e-20
 
 static int udpSocket = -1;
@@ -149,8 +153,16 @@ static uint32_t nextControlSessionId;
 static uint32_t nextEstablishmentSequence;
 static uint32_t nextReadSequence;
 static uint32_t nextWriteSequence;
+static uint32_t nextMaintenanceSequence;
 static bool controlSessionNeedsRead;
 static uint8_t establishmentRetryCount;
+static bool maintenancePinsInitialized;
+static bool maintenanceEnableOld;
+static bool maintenanceRequestPending;
+static bool maintenanceActiveState;
+static uint8_t maintenanceTransferAttempts;
+static controlEnvelope_t maintenanceRequestEnvelope;
+static long long maintenanceActiveDeadline;
 struct sockaddr_in dstAddr, srcAddr;
 struct hostent *server;
 static const char *dstAddress = "10.10.10.10";
@@ -169,6 +181,9 @@ static bool sanitize_pos_scale(hal_float_t *scale);
 static int32_t frequency_to_int32(double frequency);
 static float setpoint_to_protocol_float(hal_float_t setpoint);
 static long long create_communication_cycle_deadline(void);
+static long long create_maintenance_deadline(void);
+static void set_maintenance_active(bool active);
+static void clear_maintenance_state(void);
 static void initialize_control_session(void);
 static void begin_control_session_attempt(void);
 static void establish_control_session(
@@ -268,6 +283,17 @@ int rtapi_app_main(void)
 	retval = hal_pin_bit_newf(HAL_OUT, &(data->status),
 			comp_id, "%s.status", prefix);
 	if (retval != 0) goto error;
+
+	retval = hal_pin_bit_newf(HAL_IN, &(data->maintenanceEnable),
+			comp_id, "%s.maintenance-enable", prefix);
+	if (retval != 0) goto error;
+	*(data->maintenanceEnable) = 0;
+
+	retval = hal_pin_bit_newf(HAL_OUT, &(data->maintenanceActive),
+			comp_id, "%s.maintenance-active", prefix);
+	if (retval != 0) goto error;
+	*(data->maintenanceActive) = 0;
+	maintenancePinsInitialized = true;
 
 
 
@@ -445,6 +471,10 @@ This is throwing errors from axis.py for some reason...
 
 void rtapi_app_exit(void)
 {
+	clear_maintenance_state();
+	maintenanceEnableOld = false;
+	nextMaintenanceSequence = 0U;
+	maintenancePinsInitialized = false;
 	UDP_close();
     hal_exit(comp_id);
 }
@@ -1044,6 +1074,41 @@ static long long create_communication_cycle_deadline(void)
 	return currentTime + COMMUNICATION_CYCLE_BUDGET_NS;
 }
 
+static long long create_maintenance_deadline(void)
+{
+	long long currentTime = rtapi_get_time();
+
+	if (currentTime > (LLONG_MAX - MAINTENANCE_INTERVAL_NS))
+	{
+		return LLONG_MAX;
+	}
+
+	return currentTime + MAINTENANCE_INTERVAL_NS;
+}
+
+static void set_maintenance_active(bool active)
+{
+	maintenanceActiveState = active;
+
+	if (maintenancePinsInitialized)
+	{
+		*(data->maintenanceActive) =
+			active ? 1 : 0;
+	}
+}
+
+static void clear_maintenance_state(void)
+{
+	maintenanceRequestPending = false;
+	maintenanceTransferAttempts = 0U;
+	memset(
+		&maintenanceRequestEnvelope,
+		0,
+		sizeof(maintenanceRequestEnvelope));
+	maintenanceActiveDeadline = 0;
+	set_maintenance_active(false);
+}
+
 static void initialize_control_session(void)
 {
 	long long signedStartupTime = rtapi_get_time();
@@ -1121,8 +1186,10 @@ static void begin_control_session_attempt(void)
 	controlSessionId = 0U;
 	nextReadSequence = 0U;
 	nextWriteSequence = 0U;
+	nextMaintenanceSequence = 0U;
 	controlSessionNeedsRead = false;
 	establishmentRetryCount = 0U;
+	clear_maintenance_state();
 	controlSessionState =
 		CONTROL_SESSION_OPEN;
 }
@@ -1228,6 +1295,10 @@ static void establish_control_session(
 		control_sequence_seed(
 			controlSessionId,
 			UINT32_C(0x77726974));
+	nextMaintenanceSequence =
+		control_sequence_seed(
+			controlSessionId,
+			CONTROL_KIND_MAINTENANCE_REQUEST);
 	controlSessionNeedsRead = true;
 	controlSessionState =
 		CONTROL_SESSION_ESTABLISHED;
@@ -1269,6 +1340,46 @@ void pru_read()
 	bool resetRising =
 		*(data->reset) &&
 		!data->resetOld;
+	bool maintenanceEnabled =
+		*(data->maintenanceEnable);
+	bool maintenanceRising =
+		maintenanceEnabled &&
+		!maintenanceEnableOld;
+	long long maintenanceCurrentTime =
+		rtapi_get_time();
+
+	if (!maintenanceEnabled)
+	{
+		clear_maintenance_state();
+	}
+	else if (maintenanceActiveState &&
+			 (maintenanceCurrentTime >=
+			  maintenanceActiveDeadline))
+	{
+		maintenanceActiveDeadline = 0;
+		set_maintenance_active(false);
+	}
+
+	if (controlSessionState !=
+		CONTROL_SESSION_ESTABLISHED)
+	{
+		clear_maintenance_state();
+	}
+
+	if (maintenanceRising &&
+		*(data->enable) &&
+		(controlSessionState ==
+		 CONTROL_SESSION_ESTABLISHED) &&
+		!maintenanceRequestPending &&
+		!maintenanceActiveState)
+	{
+		prepare_control_request(
+			&maintenanceRequestEnvelope,
+			CONTROL_KIND_MAINTENANCE_REQUEST,
+			&nextMaintenanceSequence);
+		maintenanceRequestPending = true;
+		maintenanceTransferAttempts = 0U;
+	}
 
 	communicationCycleDeadline =
 		create_communication_cycle_deadline();
@@ -1290,6 +1401,39 @@ void pru_read()
 		{
 			establish_control_session(
 				responseDeadline);
+		}
+		else if (maintenanceRequestPending)
+		{
+			controlEnvelope_t response = {0};
+			const bool validResponse =
+				pru_transfer(
+					(const uint8_t *)
+						&maintenanceRequestEnvelope,
+					CONTROL_MAINTENANCE_REQUEST_SIZE,
+					(uint8_t *)&response,
+					CONTROL_MAINTENANCE_READY_SIZE,
+					CONTROL_KIND_MAINTENANCE_READY,
+					CONTROL_RESPONSE_ENVELOPE_ONLY,
+					0U,
+					0U,
+					responseDeadline);
+
+			maintenanceTransferAttempts++;
+
+			if (validResponse)
+			{
+				maintenanceRequestPending = false;
+				maintenanceTransferAttempts = 0U;
+				maintenanceActiveDeadline =
+					create_maintenance_deadline();
+				set_maintenance_active(true);
+			}
+			else if (maintenanceTransferAttempts >=
+					 MAINTENANCE_TRANSFER_ATTEMPT_LIMIT)
+			{
+				maintenanceRequestPending = false;
+				maintenanceTransferAttempts = 0U;
+			}
 		}
 		else if (resetRising ||
 				 *(data->status) ||
@@ -1424,6 +1568,8 @@ void pru_read()
 	}
 	
 	data->resetOld = *(data->reset);
+	maintenanceEnableOld =
+		maintenanceEnabled;
 }
 
 

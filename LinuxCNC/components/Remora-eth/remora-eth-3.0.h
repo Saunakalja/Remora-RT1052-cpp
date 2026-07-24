@@ -27,6 +27,8 @@
 #define CONTROL_KIND_CHALLENGE         UINT32_C(0x6368616c)
 #define CONTROL_KIND_ACTIVATE          UINT32_C(0x61637476)
 #define CONTROL_KIND_ESTABLISHED       UINT32_C(0x65737462)
+#define CONTROL_KIND_MAINTENANCE_REQUEST UINT32_C(0x6d61696e)
+#define CONTROL_KIND_MAINTENANCE_READY UINT32_C(0x6d726479)
 #define CONTROL_ENVELOPE_SIZE          16U
 #define CONTROL_ESTABLISHMENT_SIZE     24U
 #define CONTROL_COMMAND_PAYLOAD_SIZE   46U
@@ -37,6 +39,8 @@
 #define CONTROL_DATA_PACKET_SIZE       \
 	(CONTROL_ENVELOPE_SIZE + CONTROL_TELEMETRY_PAYLOAD_SIZE)
 #define CONTROL_ACK_PACKET_SIZE        CONTROL_ENVELOPE_SIZE
+#define CONTROL_MAINTENANCE_REQUEST_SIZE CONTROL_ENVELOPE_SIZE
+#define CONTROL_MAINTENANCE_READY_SIZE CONTROL_ENVELOPE_SIZE
 
 // Control wire values retain the existing little-endian integer/float contract.
 #pragma pack(push, 1)
@@ -119,6 +123,12 @@ _Static_assert(
 _Static_assert(
 	CONTROL_ACK_PACKET_SIZE == 16U,
 	"Control ACK packet size mismatch");
+_Static_assert(
+	CONTROL_MAINTENANCE_REQUEST_SIZE == 16U,
+	"Control maintenance-request packet size mismatch");
+_Static_assert(
+	CONTROL_MAINTENANCE_READY_SIZE == 16U,
+	"Control maintenance-ready packet size mismatch");
 _Static_assert(
 	CONTROL_WRITE_PACKET_SIZE == 62U,
 	"Control WRITE packet constant mismatch");

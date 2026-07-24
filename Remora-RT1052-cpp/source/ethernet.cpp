@@ -1,5 +1,6 @@
 #include "lwip/opt.h"
 
+#include "lwip/sys.h"
 #include "lwip/timeouts.h"
 #include "lwip/init.h"
 #include "lwip/pbuf.h"
@@ -22,6 +23,8 @@
 #include "extern.h"
 
 
+#define CONTROL_MAINTENANCE_INTERVAL_MS UINT32_C(30000)
+
 static mdio_handle_t mdioHandle = {.ops = &enet_ops};
 static phy_handle_t phyHandle   = {.phyAddr = BOARD_ENET0_PHY_ADDRESS, .mdioHandle = &mdioHandle, .ops = &phylan8720a_ops};
 static bool ethernetInitialized = false;
@@ -39,6 +42,10 @@ static bool readSequenceInitialized = false;
 static uint32_t lastReadSequence = 0U;
 static bool writeSequenceInitialized = false;
 static uint32_t lastWriteSequence = 0U;
+static bool maintenanceIntervalActive = false;
+static bool maintenanceSequenceInitialized = false;
+static uint32_t latestMaintenanceSequence = 0U;
+static uint32_t maintenanceExpirationDeadline = 0U;
 struct netif netif;
 
 void udp_data_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip_addr_t *addr, u16_t port);
@@ -54,6 +61,38 @@ static bool controlSerialNumberIsNewer(
 	return
 		(difference != 0U) &&
 		(difference < UINT32_C(0x80000000));
+}
+
+static void clearMaintenanceState(void)
+{
+	maintenanceIntervalActive = false;
+	maintenanceSequenceInitialized = false;
+	latestMaintenanceSequence = 0U;
+	maintenanceExpirationDeadline = 0U;
+}
+
+static bool maintenanceDeadlineReached(
+	uint32_t currentTime)
+{
+	const uint32_t timeSinceDeadline =
+		currentTime -
+		maintenanceExpirationDeadline;
+
+	return
+		timeSinceDeadline <
+			UINT32_C(0x80000000);
+}
+
+static void expireMaintenanceInterval(
+	uint32_t currentTime)
+{
+	if (maintenanceIntervalActive &&
+		maintenanceDeadlineReached(
+			currentTime))
+	{
+		maintenanceIntervalActive = false;
+		maintenanceExpirationDeadline = 0U;
+	}
 }
 
 static bool nextControlChallenge(
@@ -101,6 +140,7 @@ void controlSessionHandoffComplete(void)
 		pendingControlToken;
 	readSequenceInitialized = false;
 	writeSequenceInitialized = false;
+	clearMaintenanceState();
 	controlSessionEstablished = true;
 	controlHandoffRequested = false;
 	controlHandoffCompleted = true;
@@ -206,6 +246,9 @@ void initEthernet(void)
 
 void EthernetTasks(void)
 {
+    expireMaintenanceInterval(
+        sys_now());
+
     if (ethernetInitialized)
     {
         ethernetif_input(&netif);
@@ -406,6 +449,74 @@ void udp_data_callback(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip
 			sizeof(response));
 
 		txlen = CONTROL_ESTABLISHMENT_SIZE;
+	}
+	else if (requestEnvelope.kind ==
+			 CONTROL_KIND_MAINTENANCE_REQUEST)
+	{
+		if (p->tot_len !=
+			CONTROL_MAINTENANCE_REQUEST_SIZE)
+		{
+			pbuf_free(p);
+			return;
+		}
+
+		const uint32_t currentTime =
+			sys_now();
+
+		expireMaintenanceInterval(
+			currentTime);
+
+		if (!controlSessionEstablished ||
+			(requestEnvelope.sessionId !=
+			 activeControlSession))
+		{
+			pbuf_free(p);
+			return;
+		}
+
+		bool respondToRequest = false;
+
+		if (maintenanceIntervalActive)
+		{
+			respondToRequest =
+				maintenanceSequenceInitialized &&
+				(requestEnvelope.sequence ==
+				 latestMaintenanceSequence);
+		}
+		else if (!maintenanceSequenceInitialized ||
+				 controlSerialNumberIsNewer(
+					requestEnvelope.sequence,
+					latestMaintenanceSequence))
+		{
+			maintenanceSequenceInitialized = true;
+			latestMaintenanceSequence =
+				requestEnvelope.sequence;
+			maintenanceExpirationDeadline =
+				currentTime +
+				CONTROL_MAINTENANCE_INTERVAL_MS;
+			maintenanceIntervalActive = true;
+			respondToRequest = true;
+		}
+
+		if (!respondToRequest)
+		{
+			pbuf_free(p);
+			return;
+		}
+
+		controlEnvelope_t responseEnvelope =
+			requestEnvelope;
+
+		responseEnvelope.kind =
+			CONTROL_KIND_MAINTENANCE_READY;
+
+		memcpy(
+			responseData,
+			&responseEnvelope,
+			sizeof(responseEnvelope));
+
+		txlen =
+			CONTROL_MAINTENANCE_READY_SIZE;
 	}
 	else if (requestEnvelope.kind == CONTROL_KIND_READ)
 	{
